@@ -49,7 +49,7 @@ def _score_rsi(s: StockData) -> tuple:
         return +15, "Oversold RSI (< 35)"
     if s.rsi > 70:
         return -15, "Overbought RSI (> 70)"
-    if 42 <= s.rsi <= 60:
+    if 45 <= s.rsi <= 58:          # tightened from 42–60 — true neutral zone only
         return  +5, "RSI in neutral zone"
     return 0, None
 

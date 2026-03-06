@@ -157,7 +157,7 @@ def _fetch_single_stock(
         volume  = int(hist["Volume"].iloc[-1])           # last day volume
         avg_vol = int(hist["Volume"].mean())             # avg over period
 
-        chg_pct = round(((close_p - open_p) / open_p) * 100, 2) if open_p else 0.0
+        chg_pct = round(((close_p - open_p) / open_p) * 100, 2) if open_p and open_p != 0 else 0.0
 
         # ── RSI — fetch 1 year of daily closes for accuracy ───────────────────
         rsi_start = from_date - timedelta(days=365)
