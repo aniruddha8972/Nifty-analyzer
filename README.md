@@ -1,170 +1,73 @@
 # 📊 Nifty 50 Market Analyzer
 
-A full-stack market analysis tool for Nifty 50 stocks with a custom date range picker,
-internal AI scoring model, and one-click Excel report export.
+Real NSE data · ML ensemble prediction · News sentiment · No API key
 
-**Live on:** [Streamlit Cloud](https://share.streamlit.io) (free)
-
----
-
-## 🗂️ Project Structure
+## Project Structure
 
 ```
-nifty50_analyzer/
-├── app.py                        ← Streamlit entry point
-├── requirements.txt              ← Python dependencies
+nifty50_pro/
+├── app.py                  ← Entry point (orchestration only)
+├── requirements.txt
+├── README.md
 ├── .streamlit/
-│   └── config.toml               ← Dark theme + server config
-│
-├── backend/                      ← Data + AI layer
+│   └── config.toml         ← Dark theme
+├── backend/
 │   ├── __init__.py
-│   ├── data_engine.py            ← Stock data generation (swap for real API)
-│   └── ai_model.py               ← 9-factor scoring model (0–100)
-│
-├── frontend/                     ← UI components
+│   ├── constants.py        ← Stock universe, sector maps, RSS feeds, word lists
+│   ├── data.py             ← yfinance fetch + RSI, MACD, Bollinger, etc.
+│   └── ml.py               ← RandomForest + GradientBoosting + Ridge ensemble + sentiment
+├── frontend/
 │   ├── __init__.py
-│   └── components.py             ← CSS injection + HTML card renderers
-│
-├── pipeline/                     ← Report generation
-│   ├── __init__.py
-│   └── report_generator.py       ← 4-sheet formatted Excel export
-│
-└── tests/                        ← Unit tests
-    └── test_backend.py           ← 20+ tests for engine + model + report
+│   ├── styles.py           ← Full CSS design system (Space Mono + DM Sans)
+│   └── components.py       ← All reusable HTML components
+└── pipeline/
+    ├── __init__.py
+    └── report.py           ← Excel workbook (4 sheets)
 ```
 
----
+## Features
 
-## 🚀 Deploy to Streamlit Cloud (Free — 5 minutes)
+- **Top Gainers** — stocks with highest return in your date range
+- **Top Losers** — stocks with biggest decline in your date range
+- **AI Predictions** — ML ensemble scores every stock for buy potential
+- **News Sentiment** — scraped from free RSS feeds, no API key
+- **Excel Report** — one-click download with Gainers / Losers / Predictions / Summary
 
-### Step 1 — Push to GitHub
-```bash
-# Create a new GitHub repo, then:
-git init
-git add .
-git commit -m "Initial commit: Nifty 50 Analyzer"
-git remote add origin https://github.com/YOUR_USERNAME/nifty50-analyzer.git
-git push -u origin main
-```
+## How it works
 
-### Step 2 — Connect to Streamlit Cloud
-1. Go to **[share.streamlit.io](https://share.streamlit.io)**
-2. Sign in with GitHub
-3. Click **"New app"**
-4. Select your repo → branch: `main` → main file: `app.py`
-5. Click **"Deploy!"**
+### Data
+`yfinance` downloads daily OHLCV for all 50 Nifty stocks.
+- `change_pct` = `(last_close - first_close) / first_close * 100`
+- Period High = `df["High"].max()` over the range
+- Period Low  = `df["Low"].min()` over the range
 
-Your app will be live at:
-```
-https://YOUR_USERNAME-nifty50-analyzer-app-XXXX.streamlit.app
-```
+### ML Model
+Three models trained on 9 technical features:
+- RSI(14), MACD cross, Bollinger Band position, period range position
+- Period return, 5-day momentum, volume ratio, volatility, sector score
 
-That's it. Free hosting, auto-deploys on every `git push`.
+Ensemble: **RF 40% + GB 40% + Ridge 20%** → normalised to 0–100
 
----
+### News Sentiment
+Scraped from free RSS feeds (ET Markets, Moneycontrol, Dow Jones).
+Simple positive/negative word matching → score −1 to +1.
+Final score = `ML * 0.80 + sentiment_boost * 0.20`
 
-## 💻 Run Locally
+### Caching
+`@st.cache_data(ttl=3600)` on every yfinance call — works across all
+Streamlit Cloud workers. Same date range = identical results every time.
+
+## Run locally
 
 ```bash
-# 1. Clone / unzip the project
-cd nifty50_analyzer
-
-# 2. Install dependencies
 pip install -r requirements.txt
-
-# 3. Run
 streamlit run app.py
 ```
 
-Opens at `http://localhost:8501`
+## Deploy to Streamlit Cloud
 
----
+1. Push to GitHub
+2. Go to [share.streamlit.io](https://share.streamlit.io)
+3. New app → select repo → `app.py` → Deploy
 
-## 🧪 Run Tests
-
-```bash
-pip install pytest
-python -m pytest tests/ -v
-```
-
----
-
-## ⚙️ Features
-
-| Feature | Detail |
-|---|---|
-| **Date Presets** | Last Week, 2W, 1M, 3M, 6M, 1Y, YTD |
-| **Custom Range** | Any From → To date in the past |
-| **Data** | All 50 Nifty stocks, OHLCV + metrics |
-| **AI Model** | 9-factor internal scoring (0–100), no API key |
-| **Recommendations** | Strong Buy / Buy / Hold / Sell / Strong Sell |
-| **Risk Levels** | Low / Medium / Med-High / High |
-| **Excel Export** | 4-sheet .xlsx: Gainers, Losers, AI Analysis, Summary |
-
----
-
-## 🤖 AI Scoring Model
-
-Each stock is scored 0–100 across 9 independent factors:
-
-| Factor | Signal | Impact |
-|---|---|---|
-| RSI | < 35 oversold | +15 pts |
-| RSI | > 70 overbought | -15 pts |
-| Period Momentum | Strong gain (scales with period) | +4 to +13 pts |
-| 52W Range | Near 52W low | +14 pts |
-| 52W Range | Near 52W high | -11 pts |
-| Volume | > 1.6× average | +9 pts |
-| P/E Ratio | < 12 deeply undervalued | +10 pts |
-| P/E Ratio | > 55 very expensive | -9 pts |
-| Beta | < 0.65 defensive | +6 pts |
-| Beta | > 1.5 volatile | -6 pts |
-| Dividend Yield | > 2.5% | +6 pts |
-| Sector | FMCG/Pharma/IT/Healthcare | +3 pts |
-| Mean Reversion | 60+ day period + decline > 5% | +4 pts |
-
-**Score thresholds:**
-- `≥ 72` → STRONG BUY
-- `58–71` → BUY
-- `43–57` → HOLD
-- `29–42` → SELL
-- `≤ 28` → STRONG SELL
-
----
-
-## 🔌 Plugging in Real Data
-
-The data engine (`backend/data_engine.py`) uses deterministic simulation by default.
-To use live NSE data, replace the body of `generate_stock()` with your broker API:
-
-```python
-# Example with Zerodha Kite Connect
-from kiteconnect import KiteConnect
-
-kite = KiteConnect(api_key="YOUR_API_KEY")
-
-def generate_stock(symbol, from_date, to_date):
-    hist = kite.historical_data(
-        instrument_token = INSTRUMENT_TOKENS[symbol],
-        from_date        = from_date,
-        to_date          = to_date,
-        interval         = "day",
-    )
-    # Map hist → StockData(...)
-```
-
-The rest of the app (AI model, UI, export) works unchanged.
-
----
-
-## ⚠️ Disclaimer
-
-This tool uses **simulated data** and is for **educational/informational purposes only**.
-It does **not** constitute financial advice. Always consult a SEBI-registered investment
-advisor before making investment decisions.
-
----
-
-## 📄 License
-
-MIT
+⚠ **Disclaimer**: For educational purposes only. Not financial advice.
