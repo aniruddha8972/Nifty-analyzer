@@ -24,6 +24,7 @@ from datetime import date, timedelta
 import streamlit as st
 
 from backend.data_engine import (
+    clear_cache, get_cache_size,
     fetch_all_stocks, fetch_all_stocks_with_status,
     get_top_gainers, get_top_losers,
     get_date_range_label, trading_days_estimate,
@@ -134,9 +135,32 @@ with st.sidebar:
         key = "analyse_btn",
     )
 
+    # Cache status + Refresh button
+    cached = get_cache_size()
+    if cached > 0:
+        st.markdown(
+            f'''<div style="margin-top:8px;padding:8px 12px;background:rgba(0,229,160,0.06);
+                border:1px solid rgba(0,229,160,0.12);border-radius:6px;font-size:11px;color:#3a3a3a">
+                📦 {cached} ticker(s) cached — results are stable.<br>
+                <span style="color:#2a2a2a">Same date range = same output.</span>
+            </div>''',
+            unsafe_allow_html=True,
+        )
+        if st.button("🔄  Refresh data", use_container_width=True, key="refresh_btn",
+                     help="Clear cache and re-fetch fresh data from Yahoo Finance"):
+            clear_cache()
+            st.session_state.results = None
+            st.session_state.status  = "IDLE"
+            st.rerun()
+    else:
+        st.markdown(
+            '<div style="margin-top:8px;font-size:11px;color:#2a2a2a">No cache yet — first run will fetch live data.</div>',
+            unsafe_allow_html=True,
+        )
+
     # About
     st.markdown("""
-    <div style="margin-top:20px;padding-top:16px;border-top:1px solid rgba(255,255,255,0.07)">
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.07)">
       <div style="font-size:10px;color:#2a2a2a;line-height:1.7">
         <strong style="color:#444">Nifty 50 Analyzer</strong><br>
         Real NSE data via yfinance<br>
