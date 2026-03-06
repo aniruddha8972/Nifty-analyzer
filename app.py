@@ -1,260 +1,288 @@
-"""
-app.py — Nifty 50 Market Analyzer
-───────────────────────────────────
-@st.cache_data is the ONLY cache that works reliably on Streamlit Cloud.
-
-Streamlit Cloud load-balances across multiple worker processes.
-An in-memory dict in data_engine.py is per-worker — different workers
-have different caches so the same date range hits Yahoo Finance again
-and gets slightly different data back each time.
-
-@st.cache_data is Streamlit's shared cross-worker cache. It serializes
-the return value and stores it centrally, keyed by function + arguments.
-Same (symbol, from_date, to_date) = identical StockData, guaranteed.
-TTL=3600 means data auto-refreshes every hour.
-"""
-
-import sys, os
-sys.path.insert(0, os.path.dirname(__file__))
-
-from datetime import date, timedelta
 import streamlit as st
+import yfinance as yf
+import pandas as pd
+from datetime import date, timedelta
 
-from backend.data_engine import (
-    _fetch_single_stock_raw,
-    get_top_gainers, get_top_losers,
-    get_date_range_label, trading_days_estimate,
-    NIFTY50_SYMBOLS, StockData,
-)
-from backend.ai_model import analyse_all
-from frontend.components import (
-    inject_css, render_header, render_stat_bar,
-    render_stock_grid, render_ai_tab,
-)
-from pipeline.report_generator import generate_excel_report
+st.set_page_config(page_title="Nifty 50 Analyzer", page_icon="📊", layout="wide")
 
+# ── All 50 Nifty symbols with .NS suffix for Yahoo Finance ────────────────────
+STOCKS = {
+    "RELIANCE":"Energy",   "TCS":"IT",             "HDFCBANK":"Banking",
+    "BHARTIARTL":"Telecom","ICICIBANK":"Banking",   "INFOSYS":"IT",
+    "SBIN":"Banking",      "HINDUNILVR":"FMCG",     "ITC":"FMCG",
+    "LICI":"Insurance",    "LT":"Infra",            "BAJFINANCE":"NBFC",
+    "HCLTECH":"IT",        "KOTAKBANK":"Banking",   "MARUTI":"Auto",
+    "AXISBANK":"Banking",  "TITAN":"Consumer",      "SUNPHARMA":"Pharma",
+    "ONGC":"Energy",       "NTPC":"Power",          "ADANIENT":"Conglomerate",
+    "WIPRO":"IT",          "ULTRACEMCO":"Cement",   "POWERGRID":"Power",
+    "NESTLEIND":"FMCG",    "BAJAJFINSV":"NBFC",     "JSWSTEEL":"Metals",
+    "TATAMOTORS":"Auto",   "TECHM":"IT",            "INDUSINDBK":"Banking",
+    "TATACONSUM":"FMCG",   "COALINDIA":"Mining",    "ASIANPAINT":"Paint",
+    "HINDALCO":"Metals",   "CIPLA":"Pharma",        "DRREDDY":"Pharma",
+    "BPCL":"Energy",       "GRASIM":"Cement",       "ADANIPORTS":"Infra",
+    "EICHERMOT":"Auto",    "HEROMOTOCO":"Auto",     "BAJAJ-AUTO":"Auto",
+    "BRITANNIA":"FMCG",    "SBILIFE":"Insurance",   "APOLLOHOSP":"Healthcare",
+    "DIVISLAB":"Pharma",   "HDFCLIFE":"Insurance",  "M&M":"Auto",
+    "SHRIRAMFIN":"NBFC",   "BEL":"Defence",
+}
 
-# ── THE REAL FIX: @st.cache_data wraps the yfinance fetch ─────────────────────
-# This cache is shared across ALL Streamlit Cloud workers for this app.
-# Calling fetch_stock("TCS", date(2026,2,4), date(2026,3,6)) twice,
-# even from different workers, always returns the exact same StockData.
+# ── Cache the yfinance fetch so re-clicks never re-fetch ──────────────────────
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_stock(symbol: str, from_date: date, to_date: date):
-    """Cached single-stock fetch. TTL=1hr keeps data fresh but stable."""
-    return _fetch_single_stock_raw(symbol, from_date, to_date)
-
-
-def fetch_all_with_progress(from_date: date, to_date: date):
-    """Fetch all 50 stocks with a live progress bar. Uses cached fetch_stock."""
-    prog  = st.progress(0, text="Connecting to Yahoo Finance…")
-    empty = st.empty()
-    stocks = []
-    for i, sym in enumerate(NIFTY50_SYMBOLS):
-        pct = (i + 1) / len(NIFTY50_SYMBOLS)
-        prog.progress(pct, text=f"Fetching {sym}.NS  ({i+1}/{len(NIFTY50_SYMBOLS)})")
-        empty.markdown(
-            '<div style="color:#444;font-size:12px;text-align:center">'
-            'Fetching real NSE data via Yahoo Finance…</div>',
-            unsafe_allow_html=True,
+def fetch(symbol: str, start: str, end: str) -> pd.DataFrame:
+    """
+    Single source of truth: one yfinance call per (symbol, start, end).
+    Returns daily OHLCV DataFrame, or empty DataFrame on any error.
+    """
+    try:
+        df = yf.download(
+            f"{symbol}.NS",
+            start=start,
+            end=end,
+            auto_adjust=True,
+            progress=False,
         )
-        data = fetch_stock(sym, from_date, to_date)
-        if data is not None:
-            stocks.append(data)
-    prog.empty()
-    empty.empty()
-    return stocks
+        # Flatten multi-level columns if present
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        return df
+    except Exception:
+        return pd.DataFrame()
 
 
-# ── Page config ───────────────────────────────────────────────────────────────
-st.set_page_config(
-    page_title="Nifty 50 Analyzer",
-    page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-inject_css()
+def analyse(symbol: str, sector: str, df: pd.DataFrame) -> dict | None:
+    """
+    Given a clean OHLCV DataFrame for a date range, compute:
+      - period_high    : highest High in range
+      - period_low     : lowest  Low  in range
+      - first_close    : close on first trading day of range
+      - last_close     : close on last  trading day of range
+      - change_pct     : (last_close - first_close) / first_close * 100
+      - avg_volume     : mean daily volume over range
+      - rsi14          : RSI(14) using full history
+      - score          : simple buy score 0-100 from 5 factors
+      - recommendation : BUY / HOLD / AVOID based on score
+    """
+    if df.empty or len(df) < 2:
+        return None
 
-if "results" not in st.session_state:
-    st.session_state.results = None
-if "status" not in st.session_state:
-    st.session_state.status = "IDLE"
+    # ── Core OHLCV stats from the period ──────────────────────────────────────
+    period_high  = round(float(df["High"].max()),     2)
+    period_low   = round(float(df["Low"].min()),      2)
+    first_close  = round(float(df["Close"].iloc[0]),  2)
+    last_close   = round(float(df["Close"].iloc[-1]), 2)
+    avg_volume   = int(df["Volume"].mean())
+    last_volume  = int(df["Volume"].iloc[-1])
 
+    if first_close == 0:
+        return None
 
-# ── Sidebar ───────────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.markdown("""
-    <div style="padding:6px 0 16px">
-      <div style="font-size:10px;font-weight:800;letter-spacing:3px;color:#00e5a0;
-           text-transform:uppercase;margin-bottom:4px">Settings</div>
-      <div style="font-size:18px;font-weight:900;color:#f0f0f0">Date Range</div>
-    </div>
-    """, unsafe_allow_html=True)
+    change_pct = round((last_close - first_close) / first_close * 100, 2)
 
-    st.markdown('<div style="font-size:11px;color:#444;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:8px">Quick Presets</div>', unsafe_allow_html=True)
+    # ── RSI(14) ───────────────────────────────────────────────────────────────
+    closes = df["Close"].dropna()
+    rsi = 50.0
+    if len(closes) >= 15:
+        delta    = closes.diff().dropna()
+        gain     = delta.clip(lower=0).rolling(14).mean().iloc[-1]
+        loss     = (-delta).clip(lower=0).rolling(14).mean().iloc[-1]
+        if loss > 0:
+            rsi = round(100 - 100 / (1 + gain / loss), 1)
+        else:
+            rsi = 100.0
 
-    today = date.today()
-    preset_map = {
-        "Last Week": today - timedelta(weeks=1),
-        "2 Weeks":   today - timedelta(weeks=2),
-        "1 Month":   today - timedelta(days=30),
-        "3 Months":  today - timedelta(days=90),
-        "6 Months":  today - timedelta(days=180),
-        "1 Year":    today - timedelta(days=365),
-        "YTD":       date(today.year, 1, 1),
+    # ── 52-week position: where is last_close in the period range? ───────────
+    rng = period_high - period_low
+    position_in_range = ((last_close - period_low) / rng * 100) if rng > 0 else 50.0
+
+    # ── Volume strength: last day vs average ─────────────────────────────────
+    vol_ratio = last_volume / avg_volume if avg_volume > 0 else 1.0
+
+    # ────────────────────────────────────────────────────────────────────────
+    # SCORING (0-100): 5 simple factors, each contributes up to 20 pts
+    # ────────────────────────────────────────────────────────────────────────
+    score = 0
+
+    # 1. RSI — lower is more oversold = more buyable
+    if   rsi < 30:  score += 20   # very oversold — strong buy signal
+    elif rsi < 45:  score += 15   # mildly oversold
+    elif rsi < 60:  score += 10   # neutral
+    elif rsi < 70:  score += 5    # slightly overbought
+    else:           score += 0    # overbought — avoid
+
+    # 2. Price position in period range — lower = better value
+    if   position_in_range < 20:  score += 20  # near period low = value zone
+    elif position_in_range < 40:  score += 15
+    elif position_in_range < 60:  score += 10
+    elif position_in_range < 80:  score += 5
+    else:                         score += 0   # near period high
+
+    # 3. Price change — down more = more recovery potential
+    if   change_pct < -10: score += 20   # big drop = high recovery potential
+    elif change_pct < -5:  score += 15
+    elif change_pct < 0:   score += 10
+    elif change_pct < 5:   score += 5
+    else:                  score += 0    # already pumped
+
+    # 4. Volume on last day vs average — high volume = conviction
+    if   vol_ratio > 2.0:  score += 20
+    elif vol_ratio > 1.5:  score += 15
+    elif vol_ratio > 1.0:  score += 10
+    elif vol_ratio > 0.7:  score += 5
+    else:                  score += 0
+
+    # 5. Sector bonus — defensive sectors are safer buys
+    if sector in ("Pharma", "FMCG", "Healthcare", "IT"):
+        score += 20
+    elif sector in ("Banking", "NBFC", "Insurance"):
+        score += 15
+    elif sector in ("Auto", "Consumer", "Cement"):
+        score += 10
+    elif sector in ("Energy", "Power", "Infra"):
+        score += 5
+    else:
+        score += 0
+
+    # ── Recommendation ────────────────────────────────────────────────────────
+    if   score >= 75: rec = "🟢 STRONG BUY"
+    elif score >= 55: rec = "🟡 BUY"
+    elif score >= 35: rec = "🟠 HOLD"
+    else:             rec = "🔴 AVOID"
+
+    return {
+        "symbol":    symbol,
+        "sector":    sector,
+        "high":      period_high,
+        "low":       period_low,
+        "last":      last_close,
+        "change":    change_pct,
+        "rsi":       rsi,
+        "pos":       round(position_in_range, 1),
+        "vol_ratio": round(vol_ratio, 2),
+        "score":     score,
+        "rec":       rec,
     }
 
-    preset_cols = st.columns(2)
-    selected_preset = None
-    for i, pkey in enumerate(preset_map):
-        with preset_cols[i % 2]:
-            if st.button(pkey, key=f"preset_{pkey}", use_container_width=True):
-                selected_preset = pkey
 
-    st.markdown('<hr style="margin:14px 0">', unsafe_allow_html=True)
-    st.markdown('<div style="font-size:11px;color:#444;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:8px">Custom Range</div>', unsafe_allow_html=True)
+# ── UI ────────────────────────────────────────────────────────────────────────
+st.markdown("## 📊 Nifty 50 Analyzer")
+st.caption("Fetches real NSE data · Finds period high/low · Scores each stock for future buy potential")
+st.divider()
 
-    if selected_preset:
-        default_from = preset_map[selected_preset]
-        default_to   = today
-    else:
-        default_from = st.session_state.get("from_date", today - timedelta(days=30))
-        default_to   = st.session_state.get("to_date",   today)
+col1, col2, col3 = st.columns([1, 1, 1])
+with col1:
+    from_date = st.date_input("From", value=date.today() - timedelta(days=30),
+                               max_value=date.today() - timedelta(days=2))
+with col2:
+    to_date = st.date_input("To", value=date.today(),
+                             max_value=date.today())
+with col3:
+    st.markdown("<br>", unsafe_allow_html=True)
+    run = st.button("▶ Analyse", use_container_width=True, type="primary")
 
-    from_date = st.date_input("From", value=default_from, max_value=today - timedelta(days=1), key="from_date")
-    to_date   = st.date_input("To",   value=default_to,   max_value=today, key="to_date")
+if from_date >= to_date:
+    st.error("From date must be before To date.")
+    st.stop()
 
-    if from_date >= to_date:
-        st.error("⚠ From date must be before To date")
-        valid_range = False
-    elif from_date > today:
-        st.error("⚠ From date cannot be in the future")
-        valid_range = False
-    else:
-        valid_range  = True
-        cal_days     = (to_date - from_date).days
-        trad_days    = trading_days_estimate(cal_days)
-        st.markdown(f"""
-        <div style="background:rgba(0,229,160,0.07);border:1px solid rgba(0,229,160,0.15);
-             border-radius:8px;padding:10px 14px;margin:10px 0">
-          <div style="color:#00e5a0;font-size:12px;font-weight:700">{cal_days} calendar days</div>
-          <div style="color:#3a3a3a;font-size:11px;margin-top:2px">~{trad_days} trading days</div>
-        </div>
-        """, unsafe_allow_html=True)
+if run:
+    results = []
+    prog = st.progress(0, text="Starting…")
 
-    st.markdown('<hr style="margin:14px 0">', unsafe_allow_html=True)
+    for i, (sym, sec) in enumerate(STOCKS.items()):
+        prog.progress((i + 1) / len(STOCKS), text=f"Fetching {sym}.NS…")
+        df = fetch(sym, str(from_date), str(date(to_date.year, to_date.month, to_date.day) + timedelta(days=1)))
+        row = analyse(sym, sec, df)
+        if row:
+            results.append(row)
 
-    analyse_clicked = st.button(
-        "▶  Analyse",
-        disabled=not valid_range,
-        use_container_width=True,
-        key="analyse_btn",
-    )
+    prog.empty()
 
-    # Refresh button — clears st.cache_data so fresh data is fetched
-    if st.button("🔄  Refresh data", use_container_width=True, key="refresh_btn",
-                 help="Clear cached data and re-fetch fresh prices from Yahoo Finance"):
-        fetch_stock.clear()
-        st.session_state.results = None
-        st.session_state.status  = "IDLE"
-        st.rerun()
+    if not results:
+        st.error("No data returned. Try a different date range.")
+        st.stop()
 
-    st.markdown("""
-    <div style="margin-top:16px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.07)">
-      <div style="font-size:10px;color:#2a2a2a;line-height:1.7">
-        <strong style="color:#444">Nifty 50 Analyzer</strong><br>
-        Real NSE data via yfinance<br>
-        AI scoring · Excel export<br><br>
-        <strong style="color:#444">Stack</strong><br>
-        Python · Streamlit · yfinance<br>
-        pandas · openpyxl<br><br>
-        <strong style="color:#ff7755">⚠ Disclaimer</strong><br>
-        Data sourced from Yahoo Finance.<br>
-        Not financial advice. Always consult
-        a SEBI-registered advisor.
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
+    df_all = pd.DataFrame(results).sort_values("score", ascending=False)
+    st.session_state["results"] = df_all
+    st.session_state["range"]   = f"{from_date.strftime('%d %b %Y')} → {to_date.strftime('%d %b %Y')}"
 
+if "results" not in st.session_state:
+    st.info("Select a date range and click ▶ Analyse")
+    st.stop()
 
-# ── Header ────────────────────────────────────────────────────────────────────
-render_header(
-    date_label=get_date_range_label(from_date, to_date) if valid_range else "",
-    status=st.session_state.status,
+df_all  = st.session_state["results"]
+rng_lbl = st.session_state["range"]
+
+st.markdown(f"### Results · {rng_lbl} · {len(df_all)} stocks")
+st.divider()
+
+# ── Top 5 Buy Recommendations ─────────────────────────────────────────────────
+st.markdown("#### 🏆 Top 5 Stocks to Buy")
+top5 = df_all[df_all["rec"].str.contains("BUY")].head(5)
+
+if top5.empty:
+    st.warning("No BUY signals found in this date range.")
+else:
+    cols = st.columns(len(top5))
+    for col, (_, row) in zip(cols, top5.iterrows()):
+        with col:
+            st.markdown(f"""
+            <div style="background:#111;border:1px solid #00e5a0;border-radius:10px;
+                        padding:16px;text-align:center">
+                <div style="font-size:18px;font-weight:900;color:#fff">{row['symbol']}</div>
+                <div style="font-size:11px;color:#666;margin-bottom:8px">{row['sector']}</div>
+                <div style="font-size:22px;font-weight:900;color:#00e5a0">{row['score']}/100</div>
+                <div style="font-size:12px;color:#aaa;margin:4px 0">{row['rec']}</div>
+                <hr style="border-color:#222;margin:8px 0">
+                <div style="font-size:11px;color:#888">
+                    High ₹{row['high']:,.0f} · Low ₹{row['low']:,.0f}<br>
+                    Last ₹{row['last']:,.0f} &nbsp;
+                    <span style="color:{'#00e5a0' if row['change']>=0 else '#ff5472'}">
+                        {row['change']:+.2f}%
+                    </span><br>
+                    RSI {row['rsi']} · In range {row['pos']}%
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+st.divider()
+
+# ── Full Table ────────────────────────────────────────────────────────────────
+st.markdown("#### 📋 All 50 Stocks")
+
+def color_rec(val):
+    if "STRONG BUY" in val: return "background-color:#052e1a;color:#00e5a0"
+    if "BUY"        in val: return "background-color:#0a2a0a;color:#4ade80"
+    if "HOLD"       in val: return "background-color:#1a1500;color:#f59e0b"
+    return                         "background-color:#1a0505;color:#f87171"
+
+def color_change(val):
+    return f"color:{'#00e5a0' if val >= 0 else '#ff5472'}"
+
+display = df_all[[
+    "symbol","sector","high","low","last","change","rsi","pos","vol_ratio","score","rec"
+]].rename(columns={
+    "symbol":"Symbol","sector":"Sector",
+    "high":"Period High","low":"Period Low","last":"Last Close",
+    "change":"Change %","rsi":"RSI(14)","pos":"In Range %",
+    "vol_ratio":"Vol Ratio","score":"Score","rec":"Signal"
+})
+
+styled = (
+    display.style
+    .applymap(color_rec,       subset=["Signal"])
+    .applymap(color_change,    subset=["Change %"])
+    .format({
+        "Period High": "₹{:,.0f}", "Period Low": "₹{:,.0f}",
+        "Last Close":  "₹{:,.0f}", "Change %": "{:+.2f}%",
+        "RSI(14)": "{:.1f}", "In Range %": "{:.1f}%",
+        "Vol Ratio": "{:.2f}x", "Score": "{}/100",
+    })
+    .set_properties(**{"font-size": "13px"})
 )
 
-# ── Run analysis ──────────────────────────────────────────────────────────────
-if analyse_clicked and valid_range:
-    all_stocks = fetch_all_with_progress(from_date, to_date)
+st.dataframe(styled, use_container_width=True, height=600)
 
-    if not all_stocks:
-        st.error("⚠ No data returned from Yahoo Finance. Check your internet connection or try a different date range.")
-    else:
-        all_stocks.sort(key=lambda s: s.chg_pct, reverse=True)
-        gainers  = get_top_gainers(all_stocks)
-        losers   = get_top_losers(all_stocks)
-        combined = gainers + losers
-        analyses = analyse_all(combined)
-        cal_days = (to_date - from_date).days
-
-        st.session_state.results = dict(
-            gainers   = gainers,
-            losers    = losers,
-            combined  = combined,
-            analyses  = analyses,
-            from_date = from_date,
-            to_date   = to_date,
-            days      = cal_days,
-            label     = get_date_range_label(from_date, to_date),
-        )
-        st.session_state.status = "READY"
-        st.rerun()
-
-
-# ── Render results ─────────────────────────────────────────────────────────────
-if st.session_state.results:
-    r = st.session_state.results
-
-    render_stat_bar(r["gainers"], r["losers"], r["combined"], r["analyses"], r["days"])
-    st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
-
-    col_exp, col_spacer = st.columns([1, 3])
-    with col_exp:
-        xlsx_bytes = generate_excel_report(
-            r["gainers"], r["losers"], r["analyses"],
-            r["from_date"], r["to_date"],
-        )
-        fname = f"Nifty50_{r['from_date'].isoformat()}_to_{r['to_date'].isoformat()}.xlsx"
-        st.download_button(
-            label="📥  Export Excel Report",
-            data=xlsx_bytes,
-            file_name=fname,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-        )
-
-    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
-
-    tab_gain, tab_loss, tab_ai = st.tabs(["📈  Top Gainers", "📉  Top Losers", "🤖  AI Suggestions"])
-    with tab_gain:
-        render_stock_grid(r["gainers"], r["analyses"], card_type="gain",
-                          title=f"📈 Top 10 Gainers · {r['label']}", title_color="#00e5a0")
-    with tab_loss:
-        render_stock_grid(r["losers"], r["analyses"], card_type="loss",
-                          title=f"📉 Top 10 Losers · {r['label']}", title_color="#ff5472")
-    with tab_ai:
-        render_ai_tab(r["combined"], r["analyses"], r["label"])
-
-else:
-    st.markdown("""
-    <div style="text-align:center;padding:80px 20px">
-      <div style="font-size:58px;margin-bottom:16px">📅</div>
-      <h2 style="color:#222;font-size:21px;font-weight:800;margin-bottom:8px">
-        Select a date range &amp; click Analyse
-      </h2>
-      <p style="color:#2e2e2e;font-size:14px;line-height:1.7">
-        Use the <strong style="color:#00e5a0">sidebar</strong> to pick a quick preset<br>
-        or set a custom <strong style="color:#00e5a0">From → To</strong> date range,<br>
-        then click <strong style="color:#00e5a0">▶ Analyse</strong>
-      </p>
-    </div>
-    """, unsafe_allow_html=True)
+# ── Refresh button ─────────────────────────────────────────────────────────────
+if st.button("🔄 Clear cache & fetch fresh data"):
+    fetch.clear()
+    st.session_state.clear()
+    st.rerun()
