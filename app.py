@@ -24,8 +24,10 @@ from datetime import date, timedelta
 import streamlit as st
 
 from backend.data_engine import (
-    fetch_all_stocks, get_top_gainers, get_top_losers,
+    fetch_all_stocks, fetch_all_stocks_with_status,
+    get_top_gainers, get_top_losers,
     get_date_range_label, trading_days_estimate,
+    NIFTY50_SYMBOLS,
 )
 from backend.ai_model import analyse_all
 from frontend.components import (
@@ -137,13 +139,15 @@ with st.sidebar:
     <div style="margin-top:20px;padding-top:16px;border-top:1px solid rgba(255,255,255,0.07)">
       <div style="font-size:10px;color:#2a2a2a;line-height:1.7">
         <strong style="color:#444">Nifty 50 Analyzer</strong><br>
-        Internal AI scoring · No API key<br>
-        Export to Excel (.xlsx)<br><br>
+        Real NSE data via yfinance<br>
+        AI scoring · Excel export<br><br>
         <strong style="color:#444">Stack</strong><br>
-        Python · Streamlit · openpyxl<br><br>
+        Python · Streamlit · yfinance<br>
+        pandas · openpyxl<br><br>
         <strong style="color:#ff7755">⚠ Disclaimer</strong><br>
-        Simulated data only. Not financial advice.
-        Always consult a SEBI-registered advisor.
+        Data sourced from Yahoo Finance.<br>
+        Not financial advice. Always consult
+        a SEBI-registered advisor.
       </div>
     </div>
     """, unsafe_allow_html=True)
@@ -156,14 +160,38 @@ render_header(
 )
 
 # ── Run analysis when button clicked ─────────────────────────────────────────
+# ── CHANGED: replaced st.spinner with a real per-stock progress bar ──────────
+# fetch_all_stocks_with_status() is a generator that yields one stock at a time
+# so we can show live progress while yfinance fetches each ticker from Yahoo.
 if analyse_clicked and valid_range:
-    with st.spinner("Scanning 50 Nifty stocks..."):
-        all_stocks = fetch_all_stocks(from_date, to_date)
-        gainers    = get_top_gainers(all_stocks)
-        losers     = get_top_losers(all_stocks)
-        combined   = gainers + losers
-        analyses   = analyse_all(combined)
-        cal_days   = (to_date - from_date).days
+    total_syms  = len(NIFTY50_SYMBOLS)
+    prog_bar    = st.progress(0, text="Connecting to Yahoo Finance...")
+    status_text = st.empty()
+    all_stocks  = []
+
+    for sym, idx, data in fetch_all_stocks_with_status(from_date, to_date):
+        pct  = (idx + 1) / total_syms
+        prog_bar.progress(pct, text=f"Fetching {sym}.NS  ({idx + 1}/{total_syms})")
+        status_text.markdown(
+            f'<div style="color:#444;font-size:12px;text-align:center">'
+            f'Fetching real NSE data via Yahoo Finance…</div>',
+            unsafe_allow_html=True,
+        )
+        if data is not None:
+            all_stocks.append(data)
+
+    prog_bar.empty()
+    status_text.empty()
+
+    if not all_stocks:
+        st.error("⚠ No data returned from Yahoo Finance. Check your internet connection or try a different date range.")
+    else:
+        all_stocks.sort(key=lambda s: s.chg_pct, reverse=True)
+        gainers  = get_top_gainers(all_stocks)
+        losers   = get_top_losers(all_stocks)
+        combined = gainers + losers
+        analyses = analyse_all(combined)
+        cal_days = (to_date - from_date).days
 
         st.session_state.results = dict(
             gainers   = gainers,
@@ -174,6 +202,7 @@ if analyse_clicked and valid_range:
             to_date   = to_date,
             days      = cal_days,
             label     = get_date_range_label(from_date, to_date),
+            fetched   = len(all_stocks),       # how many tickers returned data
         )
         st.session_state.status = "READY"
         st.rerun()
