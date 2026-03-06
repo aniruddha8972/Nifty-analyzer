@@ -3,7 +3,7 @@
 A full-stack market analysis tool for Nifty 50 stocks with a custom date range picker,
 internal AI scoring model, and one-click Excel report export.
 
-**Live on:** [Streamlit Cloud](https://share.streamlit.io) (free)
+**Live on:** [Streamlit Cloud](https://niftyanalyzertop50.streamlit.app/) (free)
 
 ---
 
