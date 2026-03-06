@@ -1,20 +1,17 @@
 """
 app.py — Nifty 50 Market Analyzer
 ───────────────────────────────────
-Main Streamlit entry point.
+@st.cache_data is the ONLY cache that works reliably on Streamlit Cloud.
 
-Run locally:
-    streamlit run app.py
+Streamlit Cloud load-balances across multiple worker processes.
+An in-memory dict in data_engine.py is per-worker — different workers
+have different caches so the same date range hits Yahoo Finance again
+and gets slightly different data back each time.
 
-Deploy to Streamlit Cloud:
-    Push repo to GitHub → connect at share.streamlit.io
-
-Architecture:
-    app.py          ← Streamlit UI wiring (this file)
-    backend/        ← data engine + AI scoring model
-    frontend/       ← CSS + HTML component renderers
-    pipeline/       ← Excel report generator
-    tests/          ← unit tests
+@st.cache_data is Streamlit's shared cross-worker cache. It serializes
+the return value and stores it centrally, keyed by function + arguments.
+Same (symbol, from_date, to_date) = identical StockData, guaranteed.
+TTL=3600 means data auto-refreshes every hour.
 """
 
 import sys, os
@@ -24,11 +21,10 @@ from datetime import date, timedelta
 import streamlit as st
 
 from backend.data_engine import (
-    clear_cache, get_cache_size,
-    fetch_all_stocks, fetch_all_stocks_with_status,
+    _fetch_single_stock_raw,
     get_top_gainers, get_top_losers,
     get_date_range_label, trading_days_estimate,
-    NIFTY50_SYMBOLS,
+    NIFTY50_SYMBOLS, StockData,
 )
 from backend.ai_model import analyse_all
 from frontend.components import (
@@ -38,25 +34,53 @@ from frontend.components import (
 from pipeline.report_generator import generate_excel_report
 
 
+# ── THE REAL FIX: @st.cache_data wraps the yfinance fetch ─────────────────────
+# This cache is shared across ALL Streamlit Cloud workers for this app.
+# Calling fetch_stock("TCS", date(2026,2,4), date(2026,3,6)) twice,
+# even from different workers, always returns the exact same StockData.
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_stock(symbol: str, from_date: date, to_date: date):
+    """Cached single-stock fetch. TTL=1hr keeps data fresh but stable."""
+    return _fetch_single_stock_raw(symbol, from_date, to_date)
+
+
+def fetch_all_with_progress(from_date: date, to_date: date):
+    """Fetch all 50 stocks with a live progress bar. Uses cached fetch_stock."""
+    prog  = st.progress(0, text="Connecting to Yahoo Finance…")
+    empty = st.empty()
+    stocks = []
+    for i, sym in enumerate(NIFTY50_SYMBOLS):
+        pct = (i + 1) / len(NIFTY50_SYMBOLS)
+        prog.progress(pct, text=f"Fetching {sym}.NS  ({i+1}/{len(NIFTY50_SYMBOLS)})")
+        empty.markdown(
+            '<div style="color:#444;font-size:12px;text-align:center">'
+            'Fetching real NSE data via Yahoo Finance…</div>',
+            unsafe_allow_html=True,
+        )
+        data = fetch_stock(sym, from_date, to_date)
+        if data is not None:
+            stocks.append(data)
+    prog.empty()
+    empty.empty()
+    return stocks
+
+
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title  = "Nifty 50 Analyzer",
-    page_icon   = "📊",
-    layout      = "wide",
-    initial_sidebar_state = "expanded",
+    page_title="Nifty 50 Analyzer",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
-
 inject_css()
 
-
-# ── Session state defaults ────────────────────────────────────────────────────
 if "results" not in st.session_state:
     st.session_state.results = None
 if "status" not in st.session_state:
     st.session_state.status = "IDLE"
 
 
-# ── Sidebar — Date Range Controls ─────────────────────────────────────────────
+# ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("""
     <div style="padding:6px 0 16px">
@@ -66,24 +90,22 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
-    # Quick presets
     st.markdown('<div style="font-size:11px;color:#444;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:8px">Quick Presets</div>', unsafe_allow_html=True)
 
     today = date.today()
     preset_map = {
-        "Last Week":  today - timedelta(weeks=1),
-        "2 Weeks":    today - timedelta(weeks=2),
-        "1 Month":    today - timedelta(days=30),
-        "3 Months":   today - timedelta(days=90),
-        "6 Months":   today - timedelta(days=180),
-        "1 Year":     today - timedelta(days=365),
-        "YTD":        date(today.year, 1, 1),
+        "Last Week": today - timedelta(weeks=1),
+        "2 Weeks":   today - timedelta(weeks=2),
+        "1 Month":   today - timedelta(days=30),
+        "3 Months":  today - timedelta(days=90),
+        "6 Months":  today - timedelta(days=180),
+        "1 Year":    today - timedelta(days=365),
+        "YTD":       date(today.year, 1, 1),
     }
 
     preset_cols = st.columns(2)
     selected_preset = None
-    preset_keys = list(preset_map.keys())
-    for i, pkey in enumerate(preset_keys):
+    for i, pkey in enumerate(preset_map):
         with preset_cols[i % 2]:
             if st.button(pkey, key=f"preset_{pkey}", use_container_width=True):
                 selected_preset = pkey
@@ -91,7 +113,6 @@ with st.sidebar:
     st.markdown('<hr style="margin:14px 0">', unsafe_allow_html=True)
     st.markdown('<div style="font-size:11px;color:#444;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:8px">Custom Range</div>', unsafe_allow_html=True)
 
-    # Initialise date inputs from preset or default
     if selected_preset:
         default_from = preset_map[selected_preset]
         default_to   = today
@@ -102,7 +123,6 @@ with st.sidebar:
     from_date = st.date_input("From", value=default_from, max_value=today - timedelta(days=1), key="from_date")
     to_date   = st.date_input("To",   value=default_to,   max_value=today, key="to_date")
 
-    # Validate
     if from_date >= to_date:
         st.error("⚠ From date must be before To date")
         valid_range = False
@@ -110,55 +130,34 @@ with st.sidebar:
         st.error("⚠ From date cannot be in the future")
         valid_range = False
     else:
-        valid_range = True
-        cal_days  = (to_date - from_date).days
-        trad_days = trading_days_estimate(cal_days)
+        valid_range  = True
+        cal_days     = (to_date - from_date).days
+        trad_days    = trading_days_estimate(cal_days)
         st.markdown(f"""
         <div style="background:rgba(0,229,160,0.07);border:1px solid rgba(0,229,160,0.15);
              border-radius:8px;padding:10px 14px;margin:10px 0">
-          <div style="color:#00e5a0;font-size:12px;font-weight:700">
-            {cal_days} calendar days
-          </div>
-          <div style="color:#3a3a3a;font-size:11px;margin-top:2px">
-            ~{trad_days} trading days
-          </div>
+          <div style="color:#00e5a0;font-size:12px;font-weight:700">{cal_days} calendar days</div>
+          <div style="color:#3a3a3a;font-size:11px;margin-top:2px">~{trad_days} trading days</div>
         </div>
         """, unsafe_allow_html=True)
 
     st.markdown('<hr style="margin:14px 0">', unsafe_allow_html=True)
 
-    # Analyse button
     analyse_clicked = st.button(
         "▶  Analyse",
-        disabled = not valid_range,
-        use_container_width = True,
-        key = "analyse_btn",
+        disabled=not valid_range,
+        use_container_width=True,
+        key="analyse_btn",
     )
 
-    # Cache status + Refresh button
-    cached = get_cache_size()
-    if cached > 0:
-        st.markdown(
-            f'''<div style="margin-top:8px;padding:8px 12px;background:rgba(0,229,160,0.06);
-                border:1px solid rgba(0,229,160,0.12);border-radius:6px;font-size:11px;color:#3a3a3a">
-                📦 {cached} ticker(s) cached — results are stable.<br>
-                <span style="color:#2a2a2a">Same date range = same output.</span>
-            </div>''',
-            unsafe_allow_html=True,
-        )
-        if st.button("🔄  Refresh data", use_container_width=True, key="refresh_btn",
-                     help="Clear cache and re-fetch fresh data from Yahoo Finance"):
-            clear_cache()
-            st.session_state.results = None
-            st.session_state.status  = "IDLE"
-            st.rerun()
-    else:
-        st.markdown(
-            '<div style="margin-top:8px;font-size:11px;color:#2a2a2a">No cache yet — first run will fetch live data.</div>',
-            unsafe_allow_html=True,
-        )
+    # Refresh button — clears st.cache_data so fresh data is fetched
+    if st.button("🔄  Refresh data", use_container_width=True, key="refresh_btn",
+                 help="Clear cached data and re-fetch fresh prices from Yahoo Finance"):
+        fetch_stock.clear()
+        st.session_state.results = None
+        st.session_state.status  = "IDLE"
+        st.rerun()
 
-    # About
     st.markdown("""
     <div style="margin-top:16px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.07)">
       <div style="font-size:10px;color:#2a2a2a;line-height:1.7">
@@ -177,35 +176,15 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
 
-# ── Main Area ─────────────────────────────────────────────────────────────────
+# ── Header ────────────────────────────────────────────────────────────────────
 render_header(
-    date_label = get_date_range_label(from_date, to_date) if valid_range else "",
-    status     = st.session_state.status,
+    date_label=get_date_range_label(from_date, to_date) if valid_range else "",
+    status=st.session_state.status,
 )
 
-# ── Run analysis when button clicked ─────────────────────────────────────────
-# ── CHANGED: replaced st.spinner with a real per-stock progress bar ──────────
-# fetch_all_stocks_with_status() is a generator that yields one stock at a time
-# so we can show live progress while yfinance fetches each ticker from Yahoo.
+# ── Run analysis ──────────────────────────────────────────────────────────────
 if analyse_clicked and valid_range:
-    total_syms  = len(NIFTY50_SYMBOLS)
-    prog_bar    = st.progress(0, text="Connecting to Yahoo Finance...")
-    status_text = st.empty()
-    all_stocks  = []
-
-    for sym, idx, data in fetch_all_stocks_with_status(from_date, to_date):
-        pct  = (idx + 1) / total_syms
-        prog_bar.progress(pct, text=f"Fetching {sym}.NS  ({idx + 1}/{total_syms})")
-        status_text.markdown(
-            f'<div style="color:#444;font-size:12px;text-align:center">'
-            f'Fetching real NSE data via Yahoo Finance…</div>',
-            unsafe_allow_html=True,
-        )
-        if data is not None:
-            all_stocks.append(data)
-
-    prog_bar.empty()
-    status_text.empty()
+    all_stocks = fetch_all_with_progress(from_date, to_date)
 
     if not all_stocks:
         st.error("⚠ No data returned from Yahoo Finance. Check your internet connection or try a different date range.")
@@ -226,64 +205,46 @@ if analyse_clicked and valid_range:
             to_date   = to_date,
             days      = cal_days,
             label     = get_date_range_label(from_date, to_date),
-            fetched   = len(all_stocks),       # how many tickers returned data
         )
         st.session_state.status = "READY"
         st.rerun()
 
 
-# ── Render results ────────────────────────────────────────────────────────────
+# ── Render results ─────────────────────────────────────────────────────────────
 if st.session_state.results:
     r = st.session_state.results
 
-    # Stat bar
     render_stat_bar(r["gainers"], r["losers"], r["combined"], r["analyses"], r["days"])
-
     st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
-    # Export button
     col_exp, col_spacer = st.columns([1, 3])
     with col_exp:
-        with st.spinner(""):
-            xlsx_bytes = generate_excel_report(
-                r["gainers"], r["losers"], r["analyses"],
-                r["from_date"], r["to_date"],
-            )
+        xlsx_bytes = generate_excel_report(
+            r["gainers"], r["losers"], r["analyses"],
+            r["from_date"], r["to_date"],
+        )
         fname = f"Nifty50_{r['from_date'].isoformat()}_to_{r['to_date'].isoformat()}.xlsx"
         st.download_button(
-            label     = "📥  Export Excel Report",
-            data      = xlsx_bytes,
-            file_name = fname,
-            mime      = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width = True,
+            label="📥  Export Excel Report",
+            data=xlsx_bytes,
+            file_name=fname,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
         )
 
     st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
 
-    # Tabs
     tab_gain, tab_loss, tab_ai = st.tabs(["📈  Top Gainers", "📉  Top Losers", "🤖  AI Suggestions"])
-
     with tab_gain:
-        render_stock_grid(
-            r["gainers"], r["analyses"],
-            card_type    = "gain",
-            title        = f"📈 Top 10 Gainers · {r['label']}",
-            title_color  = "#00e5a0",
-        )
-
+        render_stock_grid(r["gainers"], r["analyses"], card_type="gain",
+                          title=f"📈 Top 10 Gainers · {r['label']}", title_color="#00e5a0")
     with tab_loss:
-        render_stock_grid(
-            r["losers"], r["analyses"],
-            card_type   = "loss",
-            title       = f"📉 Top 10 Losers · {r['label']}",
-            title_color = "#ff5472",
-        )
-
+        render_stock_grid(r["losers"], r["analyses"], card_type="loss",
+                          title=f"📉 Top 10 Losers · {r['label']}", title_color="#ff5472")
     with tab_ai:
         render_ai_tab(r["combined"], r["analyses"], r["label"])
 
 else:
-    # Empty state
     st.markdown("""
     <div style="text-align:center;padding:80px 20px">
       <div style="font-size:58px;margin-bottom:16px">📅</div>
