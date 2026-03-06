@@ -15,9 +15,9 @@ backend/data_engine.py
 ║                                                                  ║
 ║  BUG 2 FIXED — non-deterministic Yahoo row count                ║
 ║    Old: end = to_date + 1 day                                   ║
-║         Yahoo sometimes included the extra day → 21 rows one   ║
-║         call, 22 rows next → different last_close →             ║
-║         different sort → different top loser shown.             ║
+║         Hard-clip to <= to_date removes any future rows Yahoo adds.   ║
+║         Both fixes together = deterministic row count.             ║
+║                      ║
 ║    New: end = to_date (exact), then hard-filter rows to         ║
 ║         hist.index.date <= to_date to clip any overflow.        ║
 ║                                                                  ║
@@ -132,7 +132,7 @@ def _fetch_single_stock(
     BUG FIXES applied here:
       1. chg_pct = (last_close - first_close) / first_close
          — both values are closing prices; immune to open-price noise.
-      2. end date = to_date (not +1). Then rows hard-clipped to <= to_date
+      2. end date = to_date + 2 days (guarantees to_date row included).
          — prevents Yahoo returning an extra row on some calls.
       3. Cached by (symbol, from_date, to_date)
          — same inputs always return identical StockData object.
@@ -152,7 +152,7 @@ def _fetch_single_stock(
         # ── BUG 2 FIX: use to_date as exact end, then hard-clip rows ─────────
         hist = ticker.history(
             start       = from_date.strftime("%Y-%m-%d"),
-            end         = to_date.strftime("%Y-%m-%d"),   # no +1 day
+            end         = (to_date + timedelta(days=2)).strftime("%Y-%m-%d"),  # +2 ensures to_date included
             auto_adjust = True,
         )
         if not hist.empty:
@@ -177,7 +177,7 @@ def _fetch_single_stock(
         # ── RSI from 1 year of history ────────────────────────────────────────
         rsi_hist = ticker.history(
             start       = (from_date - timedelta(days=365)).strftime("%Y-%m-%d"),
-            end         = to_date.strftime("%Y-%m-%d"),
+            end         = (to_date + timedelta(days=2)).strftime("%Y-%m-%d"),
             auto_adjust = True,
         )
         rsi_val = _compute_rsi(rsi_hist["Close"]) if not rsi_hist.empty else 50.0
