@@ -126,8 +126,11 @@ def render_prediction_cards(stocks: list[dict]) -> None:
     cols = st.columns(5)
     for i, s in enumerate(stocks[:5]):
         with cols[i]:
-            sent     = s.get("sentiment", 0.0)
-            sent_col = "#00e5a0" if sent >= 0 else "#ff4560"
+            sent      = s.get("sentiment", 0.0)
+            sent_col  = "#00e5a0" if sent >= 0 else "#ff4560"
+            pred_ret  = s.get("predicted_return", 0.0)
+            pred_col  = "#00e5a0" if pred_ret >= 0 else "#ff4560"
+            n_rows    = s.get("training_rows", 0)
             st.markdown(f"""
             <div class="stock-card" style="--accent-color:{s['sig_color']}">
               <div class="card-symbol">{s['symbol']}</div>
@@ -136,12 +139,8 @@ def render_prediction_cards(stocks: list[dict]) -> None:
               <div class="card-signal" style="color:{s['sig_color']}">{s['signal']}</div>
               <hr class="card-divider">
               <div class="card-detail">
-                ML {s['ml_score']:.0f}
-                &nbsp;·&nbsp;
-                Sent <span style="color:{sent_col}">{sent:+.2f}</span><br>
-                RSI {s['rsi']:.1f}
-                &nbsp;·&nbsp;
-                <span style="color:{'#00e5a0' if s['change_pct']>=0 else '#ff4560'}">{s['change_pct']:+.2f}%</span>
+                10d pred&nbsp;<span style="color:{pred_col}">{pred_ret:+.2f}%</span><br>
+                RSI {s['rsi']:.1f} &middot; Sent <span style="color:{sent_col}">{sent:+.2f}</span>
               </div>
             </div>
             """, unsafe_allow_html=True)
@@ -188,12 +187,18 @@ def render_movers_table(stocks: list[dict]) -> None:
 
 def render_predictions_table(stocks: list[dict]) -> None:
     import pandas as pd
-    df = pd.DataFrame(stocks)[[
-        "symbol","sector","final_score","signal","ml_score","sentiment",
-        "change_pct","rsi","macd_cross","bb_pos","period_high","period_low","last_close"
-    ]].rename(columns={
+    cols_needed = ["symbol","sector","final_score","signal","predicted_return",
+                   "ml_score","sentiment","change_pct","rsi","macd_cross",
+                   "bb_pos","period_high","period_low","last_close"]
+    df_src = pd.DataFrame(stocks)
+    # predicted_return may not exist in old data — fill with 0
+    for c in cols_needed:
+        if c not in df_src.columns:
+            df_src[c] = 0.0
+    df = df_src[cols_needed].rename(columns={
         "symbol":"Symbol","sector":"Sector","final_score":"Score",
-        "signal":"Signal","ml_score":"ML Score","sentiment":"Sentiment",
+        "signal":"Signal","predicted_return":"Pred 10d %",
+        "ml_score":"ML Score","sentiment":"Sentiment",
         "change_pct":"Change %","rsi":"RSI","macd_cross":"MACD",
         "bb_pos":"BB Pos %","period_high":"High","period_low":"Low","last_close":"Last",
     })
@@ -201,11 +206,13 @@ def render_predictions_table(stocks: list[dict]) -> None:
         df.style
         .applymap(_sig_color,  subset=["Signal"])
         .applymap(_chg_color,  subset=["Change %"])
+        .applymap(_chg_color,  subset=["Pred 10d %"])
         .format({
-            "Score":"{:.1f}",    "ML Score":"{:.1f}",
-            "Sentiment":"{:+.2f}","Change %":"{:+.2f}%",
-            "RSI":"{:.1f}",       "BB Pos %":"{:.1f}%",
-            "High":"₹{:,.0f}",   "Low":"₹{:,.0f}", "Last":"₹{:,.0f}",
+            "Score":"{:.1f}",       "ML Score":"{:.1f}",
+            "Pred 10d %":"{:+.2f}%","Sentiment":"{:+.2f}",
+            "Change %":"{:+.2f}%",  "RSI":"{:.1f}",
+            "BB Pos %":"{:.1f}%",
+            "High":"₹{:,.0f}",      "Low":"₹{:,.0f}", "Last":"₹{:,.0f}",
         })
     )
     st.dataframe(styled, use_container_width=True, height=500)
