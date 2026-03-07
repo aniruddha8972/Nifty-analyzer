@@ -551,13 +551,16 @@ def render_events_tab() -> None:
             evts_html = ""
             for evt in item["events"]:
                 color     = evt.get("color", "#6b6b80")
-                desc_html = f'<span style="color:#6b6b80"> — {evt["description"]}</span>' if evt.get("description") else ""
-                evts_html += f"""
-                <span style="display:inline-block;background:rgba(0,0,0,0.3);
-                             border:1px solid {color}33;border-radius:4px;
-                             padding:2px 8px;margin:2px;font-size:11px;color:{color}">
-                  {evt['title']}{desc_html}
-                </span>"""
+                # Only append opacity suffix for 7-char hex colours (#rrggbb)
+                border_color = f"{color}44" if color.startswith("#") and len(color) == 7 else color
+                desc_text = evt.get("description", "")
+                desc_html = f'<span style="color:#6b6b80;font-size:10px"> — {desc_text}</span>' if desc_text else ""
+                evts_html += (
+                    f'<span style="display:inline-block;background:rgba(0,0,0,0.3);'
+                    f'border:1px solid {border_color};border-radius:4px;'
+                    f'padding:2px 8px;margin:2px;font-size:11px;color:{color}">'
+                    f'{evt["title"]}{desc_html}</span>'
+                )
 
             badge_color = "#ff4560" if days_away <= 3 else "#f59e0b" if days_away <= 7 else "#4a4a60"
             st.markdown(f"""
@@ -601,13 +604,13 @@ def render_events_tab() -> None:
 
 def _render_month_grid(year: int, month: int,
                        events_dict: dict, today: date) -> None:
-    import calendar
-    cal    = calendar.monthcalendar(year, month)
-    days   = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
+    import calendar as _cal
+    cal  = _cal.monthcalendar(year, month)
+    days = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
 
-    # Header
+    # Day-name header row — single line per cell
     header = "".join(
-        f'<div style="text-align:center;font-family:\'Space Mono\',monospace;'
+        f'<div style="text-align:center;font-family:Space Mono,monospace;'
         f'font-size:9px;letter-spacing:1px;color:#3a3a4e;padding:4px">{d}</div>'
         for d in days
     )
@@ -619,56 +622,59 @@ def _render_month_grid(year: int, month: int,
                 cells += '<div style="background:#050508;border-radius:4px;min-height:52px"></div>'
                 continue
 
-            d     = date(year, month, day_num)
-            d_str = str(d)
-            evts  = events_dict.get(d_str, [])
+            d          = date(year, month, day_num)
+            d_str      = str(d)
+            evts       = events_dict.get(d_str, [])
             is_today   = d == today
             is_weekend = d.weekday() >= 5
 
-            bg_color    = "#0a1520" if is_today else "#08080e"
-            num_color   = "#00e5a0" if is_today else "#6b6b80" if is_weekend else "#e8e8f0"
-            border_val  = "1px solid #00e5a0" if is_today else "1px solid #0e0e18"
+            bg     = "#0a1520" if is_today else "#08080e"
+            nc     = "#00e5a0" if is_today else ("#6b6b80" if is_weekend else "#e8e8f0")
+            border = "1px solid #00e5a0" if is_today else "1px solid #0e0e18"
 
-            dots = ""
-            for evt in evts[:3]:
-                color = evt.get("color", "#6b6b80")
-                dots += f'<div style="background:{color};width:6px;height:6px;border-radius:50%;margin:1px 1px 0"></div>'
+            # Coloured dots for events — one line each
+            dots = "".join(
+                f'<div style="display:inline-block;width:7px;height:7px;'
+                f'border-radius:50%;background:{e.get("color","#6b6b80")};'
+                f'margin:1px"></div>'
+                for e in evts[:3]
+            )
+            dots_html = f'<div style="margin-top:3px">{dots}</div>' if dots else ""
 
-            dots_row = f'<div style="display:flex;flex-wrap:wrap;margin-top:4px">{dots}</div>' if dots else ""
-            title_attr = " | ".join(e["title"] for e in evts) if evts else ""
-            title_html = f'title="{title_attr}"' if title_attr else ""
+            # Tooltip — ascii only, no quotes
+            tip = " | ".join(
+                e["title"].encode("ascii", "ignore").decode().replace('"', "")
+                for e in evts
+            )
+            tip_attr = f'title="{tip}"' if tip else ""
 
-            cells += f"""
-            <div {title_html} style="background:{bg_color};border:{border_val};
-                  border-radius:4px;padding:5px 6px;min-height:52px;cursor:default">
-              <div style="font-family:'Space Mono',monospace;font-size:10px;
-                          font-weight:700;color:{num_color}">{day_num}</div>
-              {dots_row}
-            </div>"""
+            # Everything on ONE line — critical for Streamlit markdown
+            cells += (
+                f'<div {tip_attr} style="background:{bg};border:{border};'
+                f'border-radius:4px;padding:5px 6px;min-height:52px;cursor:default">'
+                f'<div style="font-family:Space Mono,monospace;font-size:10px;'
+                f'font-weight:700;color:{nc}">{day_num}</div>'
+                f'{dots_html}</div>'
+            )
 
-    st.markdown(f"""
-    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:4px">
-      {header}
-    </div>
-    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">
-      {cells}
-    </div>
-    <div style="display:flex;gap:12px;margin-top:10px;flex-wrap:wrap">
-      <span style="font-size:10px;color:#6b6b80">
-        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;
-                     background:#f59e0b;margin-right:4px"></span>F&O Expiry
-      </span>
-      <span style="font-size:10px;color:#6b6b80">
-        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;
-                     background:#00e5a0;margin-right:4px"></span>Results
-      </span>
-      <span style="font-size:10px;color:#6b6b80">
-        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;
-                     background:#ef4444;margin-right:4px"></span>Budget
-      </span>
-      <span style="font-size:10px;color:#6b6b80">
-        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;
-                     background:#4a4a60;margin-right:4px"></span>Market Closed
-      </span>
-    </div>
-    """, unsafe_allow_html=True)
+    # Legend items
+    legend_items = [
+        ("#f59e0b", "F&amp;O Expiry"),
+        ("#00e5a0", "Results"),
+        ("#8b5cf6", "Results Season"),
+        ("#ef4444", "Budget"),
+        ("#4a4a60", "Market Closed"),
+    ]
+    legend = "".join(
+        f'<span style="font-size:10px;color:#6b6b80;margin-right:14px">'
+        f'<span style="display:inline-block;width:8px;height:8px;border-radius:50%;'
+        f'background:{c};margin-right:4px;vertical-align:middle"></span>{label}</span>'
+        for c, label in legend_items
+    )
+
+    st.markdown(
+        f'<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:4px">{header}</div>'
+        f'<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">{cells}</div>'
+        f'<div style="margin-top:10px;display:flex;flex-wrap:wrap">{legend}</div>',
+        unsafe_allow_html=True,
+    )
