@@ -59,6 +59,8 @@ def fetch_live_prices(symbols: tuple) -> dict[str, float]:
 
 
 # ── Portfolio CRUD ─────────────────────────────────────────────────────────────
+# Portfolio is stored BOTH in st.session_state["portfolio"] (fast, in-memory)
+# AND persisted to data/portfolios/<username>.json (survives reruns).
 
 def _get_portfolio() -> dict:
     if "portfolio" not in st.session_state:
@@ -66,18 +68,27 @@ def _get_portfolio() -> dict:
     return st.session_state["portfolio"]
 
 
+def _persist() -> None:
+    """Write current session portfolio to Supabase or local file."""
+    user_info = st.session_state.get("user_info", {})
+    if user_info:
+        from backend.auth import save_user_portfolio
+        save_user_portfolio(user_info, st.session_state["portfolio"])
+
+
 def add_holding(symbol: str, qty: int, price: float,
                 buy_date: str | None = None) -> None:
     """
     Add qty shares of symbol bought at price.
-    If the stock already exists, adds a new lot and recalculates avg price.
+    If the stock already exists, adds a new lot and recalculates weighted avg.
+    Persists to disk automatically.
     """
     portfolio = _get_portfolio()
     if buy_date is None:
         buy_date = str(date.today())
 
     if symbol in portfolio:
-        entry = portfolio[symbol]
+        entry     = portfolio[symbol]
         old_cost  = entry["qty"] * entry["avg_buy_price"]
         new_cost  = qty * price
         new_qty   = entry["qty"] + qty
@@ -94,12 +105,14 @@ def add_holding(symbol: str, qty: int, price: float,
             "lots":          [{"date": buy_date, "qty": qty, "price": price}],
         }
     st.session_state["portfolio"] = portfolio
+    _persist()
 
 
 def remove_holding(symbol: str) -> None:
     portfolio = _get_portfolio()
     portfolio.pop(symbol, None)
     st.session_state["portfolio"] = portfolio
+    _persist()
 
 
 def update_qty(symbol: str, new_qty: int) -> None:
@@ -111,6 +124,7 @@ def update_qty(symbol: str, new_qty: int) -> None:
         else:
             portfolio[symbol]["qty"] = new_qty
             st.session_state["portfolio"] = portfolio
+            _persist()
 
 
 # ── P&L calculation ────────────────────────────────────────────────────────────
