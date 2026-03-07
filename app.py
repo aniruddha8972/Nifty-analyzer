@@ -33,8 +33,17 @@ from datetime import date, timedelta
 
 import streamlit as st
 
-from backend.data import fetch_all, fetch_ohlcv
-from backend.ml   import predict, fetch_sentiment
+from backend.data      import fetch_all, fetch_ohlcv
+from backend.ml        import predict, fetch_sentiment
+from backend.portfolio import (
+    add_holding, remove_holding, fetch_live_prices,
+    compute_portfolio_pnl, get_portfolio_advice,
+)
+from frontend.portfolio_components import (
+    render_portfolio_summary_v2, render_holdings_table,
+    render_add_holding_form, render_manage_holdings,
+    render_advice_cards, render_portfolio_io,
+)
 from frontend     import (
     inject, render_header, render_stat_bar, render_section,
     render_gainer_cards, render_loser_cards, render_prediction_cards,
@@ -55,7 +64,8 @@ inject()
 
 
 # ── Session state defaults ─────────────────────────────────────────────────────
-if "data"   not in st.session_state: st.session_state["data"]   = None
+if "data"      not in st.session_state: st.session_state["data"]      = None
+if "portfolio" not in st.session_state: st.session_state["portfolio"]  = {}
 if "from_d" not in st.session_state: st.session_state["from_d"] = None
 if "to_d"   not in st.session_state: st.session_state["to_d"]   = None
 
@@ -187,9 +197,50 @@ if run:
     st.rerun()
 
 
-# ── No data yet ────────────────────────────────────────────────────────────────
+# ── No data yet — show empty state but still allow portfolio tab ──────────────
 if not st.session_state["data"]:
-    render_empty_state()
+    # Show tabs so portfolio is always accessible
+    _t1, _t2, _t3, _t4, _t5 = st.tabs([
+        "📈  Top Gainers", "📉  Top Losers",
+        "🤖  AI Predictions", "📋  All Stocks", "💼  My Portfolio",
+    ])
+    with _t1: render_empty_state()
+    with _t2: render_empty_state()
+    with _t3: render_empty_state()
+    with _t4: render_empty_state()
+    with _t5:
+        render_section("My Portfolio", "Live P&L · ML Advisor")
+        portfolio = st.session_state.get("portfolio", {})
+        result = render_add_holding_form()
+        if result:
+            sym, qty, price, buy_date = result
+            add_holding(sym, qty, price, buy_date)
+            st.success(f"Added {qty} × {sym} @ ₹{price:,.2f}")
+            st.rerun()
+        if not portfolio:
+            st.markdown('''<div class="empty-state">
+              <div class="empty-icon">💼</div>
+              <div class="empty-title">Portfolio is empty</div>
+              <div class="empty-sub">Use the form above to add your first holding.</div>
+            </div>''', unsafe_allow_html=True)
+        else:
+            with st.spinner("Fetching live prices…"):
+                live_prices = fetch_live_prices(tuple(portfolio.keys()))
+            pnl_rows, totals = compute_portfolio_pnl(portfolio, live_prices)
+            pnl_rows = get_portfolio_advice(pnl_rows, None)
+            render_portfolio_summary_v2(totals)
+            render_section("ML Advisor — Priority Actions", f"{len(pnl_rows)} holdings")
+            st.info("💡 Run the Market Analyzer (click ▶ ANALYSE) to get ML-powered advice.")
+            render_advice_cards(pnl_rows)
+            st.markdown("<br>", unsafe_allow_html=True)
+            render_section("Holdings Detail", "live prices · P&L")
+            render_holdings_table(pnl_rows)
+            to_remove = render_manage_holdings(pnl_rows)
+            if to_remove:
+                remove_holding(to_remove)
+                st.rerun()
+            st.markdown("<br>", unsafe_allow_html=True)
+            render_portfolio_io(portfolio)
     st.stop()
 
 
@@ -232,11 +283,12 @@ st.markdown("<hr>", unsafe_allow_html=True)
 
 
 # ── Tabs ───────────────────────────────────────────────────────────────────────
-t1, t2, t3, t4 = st.tabs([
+t1, t2, t3, t4, t5 = st.tabs([
     "📈  Top Gainers",
     "📉  Top Losers",
     "🤖  AI Predictions",
     "📋  All Stocks",
+    "💼  My Portfolio",
 ])
 
 
@@ -285,3 +337,66 @@ with t3:
 with t4:
     render_section("All Stocks", f"{len(data)} · sorted by return")
     render_all_stocks_table(data)
+
+
+# ── Tab 5: My Portfolio ────────────────────────────────────────────────────────
+with t5:
+    render_section("My Portfolio", "Live P&L · ML Advisor")
+
+    portfolio = st.session_state.get("portfolio", {})
+
+    # ── Add new holding form ───────────────────────────────────────────
+    result = render_add_holding_form()
+    if result:
+        sym, qty, price, buy_date = result
+        add_holding(sym, qty, price, buy_date)
+        st.success(f"Added {qty} × {sym} @ ₹{price:,.2f}")
+        st.rerun()
+
+    if not portfolio:
+        st.markdown("""
+        <div class="empty-state">
+          <div class="empty-icon">💼</div>
+          <div class="empty-title">Portfolio is empty</div>
+          <div class="empty-sub">
+            Use the form above to add your first holding.<br>
+            Enter the stock, quantity, buy price and date.
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        # ── Fetch live prices ──────────────────────────────────────────
+        with st.spinner("Fetching live prices…"):
+            live_prices = fetch_live_prices(tuple(portfolio.keys()))
+
+        # ── Compute P&L ────────────────────────────────────────────────
+        pnl_rows, totals = compute_portfolio_pnl(portfolio, live_prices)
+
+        # ── Attach ML advice if market data is available ───────────────
+        ml_stats = st.session_state.get("data")
+        pnl_rows = get_portfolio_advice(pnl_rows, ml_stats)
+
+        # ── Summary bar ────────────────────────────────────────────────
+        render_portfolio_summary_v2(totals)
+
+        # ── Priority advice cards ──────────────────────────────────────
+        render_section("ML Advisor — Priority Actions", f"{len(pnl_rows)} holdings")
+        if not ml_stats:
+            st.info("💡 Run the Market Analyzer (click ▶ ANALYSE) to get ML-powered advice for your holdings.")
+        render_advice_cards(pnl_rows)
+
+        # ── Full holdings table ────────────────────────────────────────
+        st.markdown("<br>", unsafe_allow_html=True)
+        render_section("Holdings Detail", "live prices · P&L · ML signal")
+        render_holdings_table(pnl_rows)
+
+        # ── Remove holdings ────────────────────────────────────────────
+        to_remove = render_manage_holdings(pnl_rows)
+        if to_remove:
+            remove_holding(to_remove)
+            st.success(f"Removed {to_remove} from portfolio")
+            st.rerun()
+
+        # ── Import / Export ────────────────────────────────────────────
+        st.markdown("<br>", unsafe_allow_html=True)
+        render_portfolio_io(portfolio)

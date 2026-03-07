@@ -1,7 +1,6 @@
 # 📊 Nifty 50 Market Analyzer
 
 Real NSE data · ML ensemble prediction · News sentiment · No API key
-live link - https://niftyanalyzertop50vb2.streamlit.app/
 
 ## Project Structure
 
