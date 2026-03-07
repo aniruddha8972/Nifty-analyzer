@@ -56,7 +56,7 @@ if not render_auth_page():
 
 # ── All other imports (only reached when logged in) ────────────────────────────
 from backend.data      import fetch_all, fetch_ohlcv
-from backend.ml        import predict, fetch_sentiment
+from backend.ml        import predict, fetch_sentiment, fetch_sentiment_data
 from backend.portfolio import (
     add_holding, remove_holding, fetch_live_prices,
     compute_portfolio_pnl, get_portfolio_advice,
@@ -305,7 +305,7 @@ if from_d >= to_d:
 
 if refresh:
     fetch_ohlcv.clear()
-    fetch_sentiment.clear()
+    fetch_sentiment_data.clear()
     # Keep auth + portfolio, clear only market data
     for key in ["data", "from_d", "to_d"]:
         st.session_state.pop(key, None)
