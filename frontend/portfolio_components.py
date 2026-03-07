@@ -95,7 +95,9 @@ def render_portfolio_summary_v2(totals: dict) -> None:
 # ── Holdings table ─────────────────────────────────────────────────────────────
 
 def render_holdings_table(rows: list[dict]) -> None:
-    """Full holdings table with P&L and ML advice per row."""
+    """Full holdings table using st.dataframe for reliable rendering."""
+    import pandas as pd
+
     if not rows:
         st.markdown('<div class="empty-state"><div class="empty-icon">💼</div>'
                     '<div class="empty-title">No holdings yet</div>'
@@ -103,56 +105,86 @@ def render_holdings_table(rows: list[dict]) -> None:
                     unsafe_allow_html=True)
         return
 
-    # Build HTML table
-    rows_html = ""
+    # Build clean DataFrame
+    records = []
     for r in rows:
-        pnl_col   = "#00e5a0" if r["pnl"] >= 0 else "#ff4560"
-        price_str = f"₹{r['current_price']:,.2f}" if r['current_price'] > 0 else "N/A"
-        rows_html += f"""
-        <tr>
-          <td style="font-family:'Space Mono',monospace;font-weight:700;color:#e8e8f0">{r['symbol']}</td>
-          <td style="color:#6b6b80;font-size:11px">{r['sector']}</td>
-          <td style="font-family:'Space Mono',monospace">{r['qty']}</td>
-          <td style="font-family:'Space Mono',monospace">₹{r['avg_buy_price']:,.2f}</td>
-          <td style="font-family:'Space Mono',monospace">{price_str}</td>
-          <td style="font-family:'Space Mono',monospace">₹{r['invested']:,.0f}</td>
-          <td style="font-family:'Space Mono',monospace;color:{pnl_col}">₹{r['current_val']:,.0f}</td>
-          <td style="font-family:'Space Mono',monospace;font-weight:700;color:{pnl_col}">₹{r['pnl']:+,.0f}</td>
-          <td style="font-family:'Space Mono',monospace;font-weight:700;color:{pnl_col}">{r['pnl_pct']:+.2f}%</td>
-          <td style="font-weight:600;color:{r['advice_color']};white-space:nowrap">{r['advice']}</td>
-        </tr>
-        <tr>
-          <td colspan="10" style="padding:2px 12px 10px 12px;font-family:'DM Sans',sans-serif;
-              font-size:11px;color:#555570;border-bottom:1px solid #1e1e2e">
-            {r['advice_reason']}
-          </td>
-        </tr>
-        """
+        records.append({
+            "Symbol":      r["symbol"],
+            "Sector":      r["sector"],
+            "Qty":         r["qty"],
+            "Avg Buy (₹)": r["avg_buy_price"],
+            "Live (₹)":    r["current_price"] if r["current_price"] > 0 else None,
+            "Invested (₹)":r["invested"],
+            "Current (₹)": r["current_val"],
+            "P&L (₹)":     r["pnl"],
+            "P&L %":       r["pnl_pct"],
+            "ML Advice":   r["advice"],
+            "Reason":      r["advice_reason"],
+        })
 
-    st.markdown(f"""
-    <div style="overflow-x:auto;margin:12px 0">
-      <table style="width:100%;border-collapse:collapse;font-family:'DM Sans',sans-serif;font-size:13px">
-        <thead>
-          <tr style="background:#0c0c12;border-bottom:2px solid #00e5a0">
-            <th style="padding:10px 12px;text-align:left;font-family:'Space Mono',monospace;
-                font-size:10px;letter-spacing:1.5px;color:#00e5a0">SYMBOL</th>
-            <th style="padding:10px 12px;text-align:left;font-size:10px;letter-spacing:1px;color:#4a4a60">SECTOR</th>
-            <th style="padding:10px 12px;text-align:center;font-size:10px;letter-spacing:1px;color:#4a4a60">QTY</th>
-            <th style="padding:10px 12px;text-align:center;font-size:10px;letter-spacing:1px;color:#4a4a60">AVG BUY ₹</th>
-            <th style="padding:10px 12px;text-align:center;font-size:10px;letter-spacing:1px;color:#4a4a60">LIVE ₹</th>
-            <th style="padding:10px 12px;text-align:center;font-size:10px;letter-spacing:1px;color:#4a4a60">INVESTED</th>
-            <th style="padding:10px 12px;text-align:center;font-size:10px;letter-spacing:1px;color:#4a4a60">CURRENT</th>
-            <th style="padding:10px 12px;text-align:center;font-size:10px;letter-spacing:1px;color:#4a4a60">P&amp;L ₹</th>
-            <th style="padding:10px 12px;text-align:center;font-size:10px;letter-spacing:1px;color:#4a4a60">P&amp;L %</th>
-            <th style="padding:10px 12px;text-align:left;font-size:10px;letter-spacing:1px;color:#4a4a60">ML ADVICE</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows_html}
-        </tbody>
-      </table>
-    </div>
-    """, unsafe_allow_html=True)
+    df = pd.DataFrame(records)
+
+    # Colour P&L columns: green if positive, red if negative
+    def colour_pnl(val):
+        if isinstance(val, (int, float)):
+            color = "#00e5a0" if val >= 0 else "#ff4560"
+            return f"color: {color}; font-weight: 700"
+        return ""
+
+    def colour_advice(val):
+        val = str(val)
+        if "BUY" in val:    return "color: #10b981; font-weight: 600"
+        if "HOLD" in val:   return "color: #f59e0b; font-weight: 600"
+        if "STOP" in val or "BOOK" in val: return "color: #ef4444; font-weight: 600"
+        if "REDUCE" in val: return "color: #f59e0b; font-weight: 600"
+        return "color: #888888"
+
+    styled = (
+        df.style
+        .applymap(colour_pnl,     subset=["P&L (₹)", "P&L %"])
+        .applymap(colour_advice,  subset=["ML Advice"])
+        .format({
+            "Avg Buy (₹)":  "₹{:,.2f}",
+            "Live (₹)":     "₹{:,.2f}",
+            "Invested (₹)": "₹{:,.0f}",
+            "Current (₹)":  "₹{:,.0f}",
+            "P&L (₹)":      "₹{:+,.0f}",
+            "P&L %":        "{:+.2f}%",
+            "Qty":          "{:,}",
+        }, na_rep="N/A")
+        .set_properties(**{
+            "background-color": "#0c0c12",
+            "color":            "#e8e8f0",
+            "border":           "1px solid #1e1e2e",
+            "font-size":        "13px",
+        })
+        .set_table_styles([
+            {"selector": "thead th", "props": [
+                ("background-color", "#050508"),
+                ("color",            "#00e5a0"),
+                ("font-family",      "'Space Mono', monospace"),
+                ("font-size",        "10px"),
+                ("letter-spacing",   "1.5px"),
+                ("text-transform",   "uppercase"),
+                ("border-bottom",    "2px solid #00e5a0"),
+                ("padding",          "10px 14px"),
+            ]},
+            {"selector": "tbody tr:hover td", "props": [
+                ("background-color", "#12121a"),
+            ]},
+            {"selector": "td", "props": [
+                ("padding",          "9px 14px"),
+                ("border-bottom",    "1px solid #1a1a28"),
+            ]},
+        ])
+    )
+
+    st.dataframe(
+        styled,
+        use_container_width=True,
+        hide_index=True,
+        height=min(80 + len(rows) * 52, 600),  # auto-height, max 600px
+    )
 
 
 # ── Add holding form ───────────────────────────────────────────────────────────
