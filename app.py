@@ -178,7 +178,7 @@ if run:
         st.error("⚠ No data returned from Yahoo Finance. Check your internet connection or try a different date range.")
         st.stop()
 
-    with st.spinner("Running ML ensemble + fetching news sentiment…"):
+    with st.spinner("Training ML on 3 years of history (~35,000 rows) — first run only, then cached…"):
         enriched = predict(all_stats)
 
     st.session_state["data"]   = enriched
@@ -259,13 +259,18 @@ with t2:
 # ── Tab 3: AI Predictions ─────────────────────────────────────────────────────
 with t3:
     render_section("AI Predictions", "RF + GB + Ridge · News Sentiment")
-    st.markdown(
-        '<div style="margin-bottom:16px;font-family:\'DM Sans\',sans-serif;'
-        'font-size:12px;color:#6b6b80">'
-        'Ensemble: RandomForest 40% + GradientBoosting 40% + Ridge 20% &nbsp;·&nbsp; '
-        'Sentiment: free RSS feeds, no API key</div>',
-        unsafe_allow_html=True,
-    )
+    n_rows = data[0].get("training_rows", 0) if data else 0
+    if n_rows > 0:
+        st.markdown(
+            f'<div style="margin-bottom:16px;padding:10px 16px;'
+            f'background:#0a1a10;border:1px solid #1a3a28;border-radius:6px;'
+            f'font-family:\'Space Mono\',monospace;font-size:11px;color:#6b6b80">'
+            f'<span style="color:#00e5a0">✓ Trained on {n_rows:,} real rows</span>'
+            f' &nbsp;·&nbsp; 50 stocks × 3 yrs daily OHLCV'
+            f' &nbsp;·&nbsp; Target = 10-day forward return'
+            f' &nbsp;·&nbsp; RF 40% + GB 40% + Ridge 20%</div>',
+            unsafe_allow_html=True,
+        )
     buy_stocks = [s for s in predictions if "BUY" in s.get("signal", "")]
     if buy_stocks:
         render_section("Top Buy Signals", f"{len(buy_stocks)} stocks")
