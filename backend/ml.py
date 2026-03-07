@@ -306,34 +306,62 @@ def _get_trained_models():
 # ══════════════════════════════════════════════════════════════════════
 
 @st.cache_data(ttl=1800, show_spinner=False)
-def fetch_sentiment(symbols: tuple) -> dict:
-    """Live RSS sentiment at prediction time. Cached 30 min."""
+def fetch_sentiment_data(symbols: tuple) -> dict:
+    """
+    Scrape free RSS feeds for each symbol.
+    Returns dict: { sym -> {"score": float, "headlines": [str, ...]} }
+    score is -1.0 to +1.0. headlines are the raw matching titles (title-cased).
+    Cached 30 min.
+    """
     import requests
     from bs4 import BeautifulSoup
 
-    headlines = []
+    # Collect all (title, text) pairs — keep original case for display
+    all_items: list[tuple[str, str]] = []   # (display_text, lowercase_text)
     for url in FREE_RSS:
         try:
             r = requests.get(url, timeout=5, headers={"User-Agent": "Mozilla/5.0"})
             soup = BeautifulSoup(r.content, "lxml-xml")
-            for tag in soup.find_all(["title", "description"])[:60]:
-                if tag.text:
-                    headlines.append(tag.text.lower())
+            for tag in soup.find_all("title")[:80]:
+                txt = tag.text.strip()
+                if txt and len(txt) > 10:
+                    all_items.append((txt, txt.lower()))
         except Exception:
             pass
 
     result = {}
     for sym in symbols:
-        relevant = [h for h in headlines if sym.lower() in h]
-        if not relevant:
-            result[sym] = 0.0
+        sym_lower = sym.lower()
+        # Match headlines containing the symbol name
+        matched = [(disp, low) for disp, low in all_items if sym_lower in low]
+        if not matched:
+            result[sym] = {"score": 0.0, "headlines": []}
             continue
-        words = re.findall(r"\b\w+\b", " ".join(relevant))
+
+        # Score using POS/NEG word lists
+        words = re.findall(r"\b\w+\b", " ".join(low for _, low in matched))
         p = sum(1 for w in words if w in POS_WORDS)
         n = sum(1 for w in words if w in NEG_WORDS)
-        result[sym] = round((p - n) / (p + n), 2) if (p + n) > 0 else 0.0
+        score = round((p - n) / (p + n), 2) if (p + n) > 0 else 0.0
+
+        # Keep up to 5 unique display headlines, cleaned up
+        seen   = set()
+        kept   = []
+        for disp, _ in matched:
+            clean = disp.strip()
+            if clean not in seen and len(kept) < 5:
+                seen.add(clean)
+                kept.append(clean)
+
+        result[sym] = {"score": score, "headlines": kept}
 
     return result
+
+
+def fetch_sentiment(symbols: tuple) -> dict:
+    """Backward-compatible wrapper — returns just scores."""
+    data = fetch_sentiment_data(symbols)
+    return {sym: v["score"] for sym, v in data.items()}
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -401,7 +429,7 @@ def predict(stats: list[dict]) -> list[dict]:
             s.update(ml_score=50.0, sentiment=0.0, final_score=50.0,
                      predicted_return=0.0, signal="🟠 HOLD",
                      sig_color="#f59e0b", training_rows=n_rows,
-                     n_features=len(FEATURE_COLS))
+                     n_features=len(FEATURE_COLS), news_headlines=[])
         return stats
 
     # Build predictions
@@ -419,8 +447,10 @@ def predict(stats: list[dict]) -> list[dict]:
     mn, mx    = raw.min(), raw.max()
     ml_scores = (raw - mn) / (mx - mn) * 100 if mx > mn else np.full(len(stats), 50.0)
 
-    # Live RSS sentiment (prediction time only)
-    sentiment = fetch_sentiment(tuple(s["symbol"] for s in stats))
+    # Live RSS sentiment + headlines (prediction time only)
+    sent_data  = fetch_sentiment_data(tuple(s["symbol"] for s in stats))
+    sentiment  = {sym: v["score"] for sym, v in sent_data.items()}
+    headlines  = {sym: v["headlines"] for sym, v in sent_data.items()}
 
     enriched = []
     for s, ml_sc, raw_pred in zip(stats, ml_scores, raw_preds):
@@ -442,6 +472,7 @@ def predict(stats: list[dict]) -> list[dict]:
             "sig_color":        col,
             "training_rows":    n_rows,
             "n_features":       len(FEATURE_COLS),
+            "news_headlines":   headlines.get(s["symbol"], []),
         })
 
     return enriched
