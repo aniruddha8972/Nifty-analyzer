@@ -121,7 +121,7 @@ def render_heatmap_tab(stock_data: list[dict]) -> None:
             font=dict(family="DM Sans", color="#e8e8f0"),
         )
 
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, key="heatmap_treemap")
 
     except ImportError:
         # Fallback: HTML grid if plotly not installed
@@ -302,7 +302,7 @@ def _render_backtest_results(result: dict) -> None:
                 font=dict(family="DM Sans", color="#6b6b80"),
                 showlegend=False,
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, key="backtest_equity")
         except ImportError:
             pass
 
@@ -449,12 +449,33 @@ def render_correlation_tab(portfolio_symbols: list[str] | None = None) -> None:
             yaxis=dict(tickfont=dict(size=8, color="#6b6b80")),
             font=dict(family="DM Sans"),
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, key="corr_heatmap")
     except ImportError:
         st.info("Install plotly for the correlation heatmap visualization.")
 
     # ── Top correlated pairs ───────────────────────────────────────────
     most_corr, most_inv = get_top_correlations(corr_matrix, top_n=8)
+
+    def _colour_corr_high(val):
+        """Green for high positive correlation (bad — stocks move together)."""
+        if not isinstance(val, float):
+            return ""
+        intensity = int(abs(val) * 180)
+        if val >= 0.7:
+            return f"color:#ff4560;font-weight:700"
+        elif val >= 0.4:
+            return f"color:#f59e0b;font-weight:600"
+        return "color:#e8e8f0"
+
+    def _colour_corr_low(val):
+        """Green for low/negative correlation (good — natural hedge)."""
+        if not isinstance(val, float):
+            return ""
+        if val <= -0.1:
+            return "color:#00e5a0;font-weight:700"
+        elif val <= 0.2:
+            return "color:#34d399;font-weight:600"
+        return "color:#e8e8f0"
 
     c1, c2 = st.columns(2)
     with c1:
@@ -465,10 +486,10 @@ def render_correlation_tab(portfolio_symbols: list[str] | None = None) -> None:
             pair_df = pd.DataFrame(rows)
             styled  = (pair_df.style
                        .format({"Correlation": "{:.3f}"})
-                       .background_gradient(subset=["Correlation"],
-                                            cmap="RdYlGn", vmin=-1, vmax=1)
-                       .set_properties(**{"background-color":"#0c0c12",
-                                          "color":"#e8e8f0","border":"1px solid #1e1e2e"}))
+                       .map(_colour_corr_high, subset=["Correlation"])
+                       .set_properties(**{"background-color": "#0c0c12",
+                                          "color": "#e8e8f0",
+                                          "border": "1px solid #1e1e2e"}))
             st.dataframe(styled, width="stretch", hide_index=True)
 
     with c2:
@@ -479,10 +500,10 @@ def render_correlation_tab(portfolio_symbols: list[str] | None = None) -> None:
             pair_df = pd.DataFrame(rows)
             styled  = (pair_df.style
                        .format({"Correlation": "{:.3f}"})
-                       .background_gradient(subset=["Correlation"],
-                                            cmap="RdYlGn_r", vmin=-1, vmax=1)
-                       .set_properties(**{"background-color":"#0c0c12",
-                                          "color":"#e8e8f0","border":"1px solid #1e1e2e"}))
+                       .map(_colour_corr_low, subset=["Correlation"])
+                       .set_properties(**{"background-color": "#0c0c12",
+                                          "color": "#e8e8f0",
+                                          "border": "1px solid #1e1e2e"}))
             st.dataframe(styled, width="stretch", hide_index=True)
 
 
@@ -529,9 +550,9 @@ def render_events_tab() -> None:
 
             evts_html = ""
             for evt in item["events"]:
-                color = evt.get("color", "#6b6b80")
+                color     = evt.get("color", "#6b6b80")
                 desc_html = f'<span style="color:#6b6b80"> — {evt["description"]}</span>' if evt.get("description") else ""
-            evts_html += f"""
+                evts_html += f"""
                 <span style="display:inline-block;background:rgba(0,0,0,0.3);
                              border:1px solid {color}33;border-radius:4px;
                              padding:2px 8px;margin:2px;font-size:11px;color:{color}">
@@ -563,9 +584,9 @@ def render_events_tab() -> None:
     today = date.today()
     # Show current month + next 2 months
     for m_offset in range(3):
-        target_month = today.month + m_offset
-        target_year  = today.year + (target_month - 1) // 12
-        target_month = ((target_month - 1) % 12) + 1
+        raw_month    = today.month + m_offset - 1   # 0-indexed
+        target_year  = today.year + raw_month // 12
+        target_month = raw_month % 12 + 1
 
         month_name = date(target_year, target_month, 1).strftime("%B %Y")
         st.markdown(f"""
