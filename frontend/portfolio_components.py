@@ -141,8 +141,8 @@ def render_holdings_table(rows: list[dict]) -> None:
 
     styled = (
         df.style
-        .applymap(colour_pnl,     subset=["P&L (₹)", "P&L %"])
-        .applymap(colour_advice,  subset=["ML Advice"])
+        .map(colour_pnl,     subset=["P&L (₹)", "P&L %"])
+        .map(colour_advice,  subset=["ML Advice"])
         .format({
             "Avg Buy (₹)":  "₹{:,.2f}",
             "Live (₹)":     "₹{:,.2f}",
@@ -181,9 +181,9 @@ def render_holdings_table(rows: list[dict]) -> None:
 
     st.dataframe(
         styled,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
-        height=min(80 + len(rows) * 52, 600),  # auto-height, max 600px
+        height=min(80 + len(rows) * 52, 600),
     )
 
 
@@ -235,7 +235,7 @@ def render_add_holding_form() -> tuple | None:
         )
     with col5:
         st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-        submitted = st.button("➕  ADD", use_container_width=True, type="primary",
+        submitted = st.button("➕  ADD", width="stretch", type="primary",
                               key="pf_add_btn")
 
     st.markdown("</div>", unsafe_allow_html=True)
@@ -267,7 +267,7 @@ def render_manage_holdings(rows: list[dict]) -> str | None:
     for i, r in enumerate(rows):
         with cols[i % 8]:
             if st.button(f"✕ {r['symbol']}", key=f"rm_{r['symbol']}",
-                         use_container_width=True):
+                         width="stretch"):
                 to_remove = r["symbol"]
     return to_remove
 
@@ -338,7 +338,7 @@ def render_portfolio_io(portfolio: dict):
             data=json_str,
             file_name="my_portfolio.json",
             mime="application/json",
-            use_container_width=True,
+            width="stretch",
             key="pf_export",
         )
 
