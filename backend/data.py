@@ -30,6 +30,7 @@ def _download(ticker: str, start: str, end: str) -> pd.DataFrame:
                          auto_adjust=True, progress=False)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
+        df.columns = [str(c).strip() for c in df.columns]  # normalise column names
         return df.dropna()
     except Exception:
         return pd.DataFrame()

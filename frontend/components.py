@@ -182,7 +182,7 @@ def render_movers_table(stocks: list[dict]) -> None:
             "Vol Ratio":"{:.2f}x",
         })
     )
-    st.dataframe(styled, use_container_width=True)
+    st.dataframe(styled, width="stretch")
 
 
 def render_predictions_table(stocks: list[dict]) -> None:
@@ -215,7 +215,7 @@ def render_predictions_table(stocks: list[dict]) -> None:
             "High":"₹{:,.0f}",      "Low":"₹{:,.0f}", "Last":"₹{:,.0f}",
         })
     )
-    st.dataframe(styled, use_container_width=True, height=500)
+    st.dataframe(styled, width="stretch", height=500)
 
 
 def render_all_stocks_table(data: list[dict]) -> None:
@@ -243,7 +243,7 @@ def render_all_stocks_table(data: list[dict]) -> None:
             "AI Score":"{:.1f}",
         })
     )
-    st.dataframe(styled, use_container_width=True, height=700)
+    st.dataframe(styled, width="stretch", height=700)
 
 
 # ── Empty state ────────────────────────────────────────────────────────────────
