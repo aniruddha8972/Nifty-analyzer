@@ -42,7 +42,7 @@ st.set_page_config(
     page_title="Nifty 50 Analyzer",
     page_icon="📊",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",   # open so user can see profile + logout
 )
 
 # ── Auth gate ──────────────────────────────────────────────────────────────────
@@ -83,65 +83,124 @@ if "to_d"   not in st.session_state: st.session_state["to_d"]   = None
 # portfolio is already loaded from disk by render_auth_page → login
 
 
-# ── Sidebar — user profile + info ─────────────────────────────────────────────
+# ── Sidebar — user profile + logout ───────────────────────────────────────────
 user = st.session_state.get("user_info", {})
+
+def _do_logout():
+    """Save portfolio, sign out of Supabase if needed, clear session."""
+    user_info = st.session_state.get("user_info", {})
+    portfolio = st.session_state.get("portfolio", {})
+    if user_info:
+        save_user_portfolio(user_info, portfolio)
+        auth_logout(user_info)
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+    st.rerun()
+
 with st.sidebar:
-    st.markdown(f"""
-    <div style="padding:16px 0 8px">
+    # App name
+    st.markdown("""
+    <div style="padding:12px 0 0">
       <div style="font-family:'Space Mono',monospace;font-size:10px;
-                  letter-spacing:3px;text-transform:uppercase;color:#00e5a0">
-        Nifty 50 Analyzer
-      </div>
-
-      <div style="margin:18px 0 0;padding:14px;background:#08080e;
-                  border:1px solid #1a1a28;border-radius:8px">
-        <div style="font-family:'Space Mono',monospace;font-size:9px;
-                    letter-spacing:2px;text-transform:uppercase;
-                    color:#3a3a4e;margin-bottom:8px">LOGGED IN AS</div>
-        <div style="font-family:'Space Mono',monospace;font-size:13px;
-                    font-weight:700;color:#e8e8f0">{user.get('name','—')}</div>
-        <div style="font-family:'DM Sans',sans-serif;font-size:10px;
-                    color:#3a3a4e;margin-top:3px">@{user.get('username','')}</div>
-        <div style="font-family:'DM Sans',sans-serif;font-size:10px;
-                    color:#2a2a3e;margin-top:2px">{user.get('email','')}</div>
-        <div style="font-family:'DM Sans',sans-serif;font-size:9px;
-                    color:#2a2a3e;margin-top:6px">
-          Member since {user.get('created_at','—')}
-        </div>
-      </div>
-
-      <div style="font-family:'Space Mono',monospace;font-size:9px;
-                  color:#3a3a4e;margin-top:16px;letter-spacing:1px;line-height:2">
-        STACK<br>
-        <span style="color:#2a2a3e">
-          Python · Streamlit<br>
-          yfinance · scikit-learn<br>
-          openpyxl · BeautifulSoup<br>
-          {'☁ Supabase' if is_supabase_mode() else '⚡ Local JSON'}
-        </span>
-      </div>
-
-      <div style="margin-top:16px;padding-top:14px;border-top:1px solid #1a1a28;
-                  font-family:'DM Sans',sans-serif;font-size:10px;
-                  color:#2a2a3e;font-style:italic;line-height:1.6">
-        ⚠ Not financial advice.<br>
-        Consult a SEBI-registered advisor.
+                  letter-spacing:3px;text-transform:uppercase;color:#00e5a0;
+                  margin-bottom:16px">
+        📊 &nbsp;Nifty 50 Analyzer
       </div>
     </div>
     """, unsafe_allow_html=True)
 
-    # Logout button
-    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-    if st.button("⏻  Log Out", use_container_width=True, key="logout_btn"):
-        user_info = st.session_state.get("user_info", {})
-        portfolio = st.session_state.get("portfolio", {})
-        # Save portfolio then sign out
-        if user_info:
-            save_user_portfolio(user_info, portfolio)
-            auth_logout(user_info)
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.rerun()
+    # ── User profile card ──────────────────────────────────────────────
+    name     = user.get("name", "—")
+    username = user.get("username", "")
+    email    = user.get("email", "")
+    joined   = user.get("created_at", "")
+    n_stocks = len(st.session_state.get("portfolio", {}))
+    mode_badge = "☁ Supabase" if is_supabase_mode() else "⚡ Local"
+
+    # Avatar initials
+    initials = "".join(w[0].upper() for w in name.split()[:2]) if name != "—" else "?"
+
+    st.markdown(f"""
+    <div style="background:#08080e;border:1px solid #1a1a28;border-radius:10px;
+                padding:16px;margin-bottom:16px;position:relative">
+
+      <!-- Avatar + name row -->
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+        <div style="width:42px;height:42px;border-radius:50%;
+                    background:linear-gradient(135deg,#00e5a0,#00a370);
+                    display:flex;align-items:center;justify-content:center;
+                    font-family:'Space Mono',monospace;font-size:14px;
+                    font-weight:700;color:#050508;flex-shrink:0">
+          {initials}
+        </div>
+        <div>
+          <div style="font-family:'Space Mono',monospace;font-size:13px;
+                      font-weight:700;color:#e8e8f0;line-height:1.2">{name}</div>
+          <div style="font-family:'DM Sans',sans-serif;font-size:11px;
+                      color:#4a4a60;margin-top:2px">@{username}</div>
+        </div>
+      </div>
+
+      <!-- Details -->
+      <div style="font-family:'DM Sans',sans-serif;font-size:11px;
+                  color:#3a3a4e;line-height:2;border-top:1px solid #1a1a28;
+                  padding-top:10px">
+        <span style="color:#2a2a3e">✉</span>&nbsp; {email}<br>
+        <span style="color:#2a2a3e">📅</span>&nbsp; Joined {joined}<br>
+        <span style="color:#2a2a3e">💼</span>&nbsp;
+          <span style="color:#00e5a0;font-family:'Space Mono',monospace;font-size:11px">
+            {n_stocks}
+          </span> holding{"s" if n_stocks != 1 else ""}
+      </div>
+
+      <!-- Backend badge -->
+      <div style="margin-top:10px">
+        <span style="font-family:'Space Mono',monospace;font-size:9px;
+                     letter-spacing:1.5px;text-transform:uppercase;
+                     background:rgba(0,229,160,0.07);
+                     border:1px solid rgba(0,229,160,0.15);
+                     color:#00a370;padding:3px 8px;border-radius:3px">
+          {mode_badge}
+        </span>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── Logout button — big, red, unmissable ───────────────────────────
+    st.markdown("""
+    <style>
+    div[data-testid="stSidebar"] div[data-testid="stButton"]:last-of-type > button {
+      background: transparent !important;
+      border: 1px solid #3a1a1a !important;
+      color: #ff4560 !important;
+      font-family: 'Space Mono', monospace !important;
+      font-size: 11px !important;
+      letter-spacing: 2px !important;
+      height: 42px !important;
+      border-radius: 7px !important;
+      transition: all 0.18s ease !important;
+    }
+    div[data-testid="stSidebar"] div[data-testid="stButton"]:last-of-type > button:hover {
+      background: rgba(255,69,96,0.1) !important;
+      border-color: #ff4560 !important;
+      box-shadow: 0 0 14px rgba(255,69,96,0.2) !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    if st.button("⏻  LOG OUT", use_container_width=True, key="logout_btn"):
+        _do_logout()
+
+    # ── Disclaimer ─────────────────────────────────────────────────────
+    st.markdown("""
+    <div style="margin-top:20px;padding-top:14px;border-top:1px solid #1a1a28;
+                font-family:'DM Sans',sans-serif;font-size:10px;
+                color:#2a2a3e;font-style:italic;line-height:1.7">
+      ⚠ Not financial advice.<br>
+      Consult a SEBI-registered advisor<br>
+      before making any investment.
+    </div>
+    """, unsafe_allow_html=True)
 
 
 # ── App Header ─────────────────────────────────────────────────────────────────
@@ -150,7 +209,43 @@ if st.session_state["from_d"] and st.session_state["to_d"]:
     f = st.session_state["from_d"]
     t = st.session_state["to_d"]
     label = f"{f.strftime('%d %b %Y')} → {t.strftime('%d %b %Y')}"
-render_header(label)
+
+# Header row: title left, user info + logout right
+hcol1, hcol2 = st.columns([7, 3])
+with hcol1:
+    render_header(label)
+with hcol2:
+    name     = user.get("name", "")
+    username = user.get("username", "")
+    initials = "".join(w[0].upper() for w in name.split()[:2]) if name else "?"
+    st.markdown(f"""
+    <div style="display:flex;align-items:center;justify-content:flex-end;
+                gap:10px;padding-top:18px">
+      <div style="text-align:right">
+        <div style="font-family:'Space Mono',monospace;font-size:12px;
+                    font-weight:700;color:#e8e8f0">{name}</div>
+        <div style="font-family:'DM Sans',sans-serif;font-size:10px;
+                    color:#4a4a60">@{username}</div>
+      </div>
+      <div style="width:36px;height:36px;border-radius:50%;flex-shrink:0;
+                  background:linear-gradient(135deg,#00e5a0,#00a370);
+                  display:flex;align-items:center;justify-content:center;
+                  font-family:'Space Mono',monospace;font-size:13px;
+                  font-weight:700;color:#050508">
+        {initials}
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+    # Small inline logout button
+    st.markdown("""
+    <style>
+    div[data-testid="stHorizontalBlock"] div[data-testid="stButton"] > button[key="logout_header"] {
+      height:32px !important; font-size:10px !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    if st.button("⏻ Log Out", key="logout_header", use_container_width=True):
+        _do_logout()
 
 
 # ══════════════════════════════════════════════════════════════════════
