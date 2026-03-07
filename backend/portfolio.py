@@ -154,8 +154,6 @@ def compute_portfolio_pnl(
         current_val = qty * price if price > 0 else 0.0
         pnl         = current_val - invested
         pnl_pct     = (pnl / invested * 100) if invested > 0 else 0.0
-        day_val     = price * qty   # same as current_val when price is latest
-
         rows.append({
             "symbol":        sym,
             "sector":        entry["sector"],

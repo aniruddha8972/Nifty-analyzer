@@ -67,7 +67,7 @@ def _get_supabase_client(access_token: str | None = None):
 
     if access_token:
         # Set the user's JWT so all queries run under their identity
-        client.postgrest.auth(access_token)
+        client.postgrest.auth(access_token)  # supabase-py v2: set JWT on postgrest
 
     return client
 
@@ -244,7 +244,8 @@ def _save_users(users: dict):
         _USERS_FILE.write_text(json.dumps(users, indent=2))
 
 def _local_pf_path(username: str) -> Path:
-    return _PORTFOLIO_DIR / f"{username.lower()}.json"
+    safe = (username or "anonymous").lower()
+    return _PORTFOLIO_DIR / f"{safe}.json"
 
 
 def _local_register(username: str, name: str, email: str, password: str) -> tuple[bool, str]:
