@@ -244,11 +244,12 @@ def render_all_stocks_table(data: list[dict]) -> None:
 def render_empty_state() -> None:
     st.markdown("""
     <div class="empty-state">
-      <div class="empty-icon">▐█▌</div>
-      <div class="empty-title">awaiting input</div>
+      <div class="empty-icon">📊</div>
+      <div class="empty-title">Select a date range &amp; click Analyse</div>
       <div class="empty-sub">
-        Select a date range from the sidebar<br>
-        then click <strong>▶ ANALYSE</strong> to run
+        Use the <strong>Quick Preset</strong> above or set a custom
+        <strong>From → To</strong> date range,<br>
+        then click <strong>▶ Analyse</strong>
       </div>
     </div>
     """, unsafe_allow_html=True)
