@@ -259,15 +259,17 @@ with t2:
 # ── Tab 3: AI Predictions ─────────────────────────────────────────────────────
 with t3:
     render_section("AI Predictions", "RF + GB + Ridge · News Sentiment")
-    n_rows = data[0].get("training_rows", 0) if data else 0
+    n_rows  = data[0].get("training_rows", 0) if data else 0
+    n_feats = data[0].get("n_features", 0)    if data else 0
     if n_rows > 0:
         st.markdown(
             f'<div style="margin-bottom:16px;padding:10px 16px;'
             f'background:#0a1a10;border:1px solid #1a3a28;border-radius:6px;'
             f'font-family:\'Space Mono\',monospace;font-size:11px;color:#6b6b80">'
-            f'<span style="color:#00e5a0">✓ Trained on {n_rows:,} real rows</span>'
-            f' &nbsp;·&nbsp; 50 stocks × 3 yrs daily OHLCV'
-            f' &nbsp;·&nbsp; Target = 10-day forward return'
+            f'<span style="color:#00e5a0">✓ {n_rows:,} real training rows</span>'
+            f' &nbsp;·&nbsp; 50 stocks × 3yr daily OHLCV'
+            f' &nbsp;·&nbsp; {n_feats} features (8 technical + 7 sentiment proxies + 2 market-relative)'
+            f' &nbsp;·&nbsp; Target = actual 10-day forward return'
             f' &nbsp;·&nbsp; RF 40% + GB 40% + Ridge 20%</div>',
             unsafe_allow_html=True,
         )
