@@ -98,30 +98,29 @@ def _sb_register(username: str, name: str, email: str, password: str) -> tuple[b
         uid   = res.user.id
         token = res.session.access_token if res.session else None
 
-        # 3. Insert profile row
-        # Use authenticated client if we have a token (email confirmation OFF)
-        # Fall back to anon client if no session (email confirmation ON) —
-        # the RLS policy now allows insert for any valid auth.users id.
-        insert_client = _get_supabase_client(token) if token else client
-
-        insert_client.table("profiles").insert({
+        # 3. Update the profile row with real username + name.
+        #    A DB trigger (handle_new_user) already created the row the
+        #    instant auth.users was inserted — so we UPDATE, never INSERT.
+        #    This avoids all FK timing issues.
+        update_client = _get_supabase_client(token) if token else client
+        update_client.table("profiles").upsert({
             "id":       uid,
             "username": username.lower().strip(),
             "name":     name.strip(),
         }).execute()
 
-        # 4. Create empty portfolio row
-        insert_client.table("portfolios").insert({
+        # 4. Portfolio row also created by trigger — upsert is a no-op if empty
+        update_client.table("portfolios").upsert({
             "user_id": uid,
             "data":    {},
         }).execute()
 
         if token:
-            return True, f"Welcome, {name}! Account created. You can sign in now."
+            return True, f"Welcome, {name}! Account created."
         else:
             return True, (
-                f"Account created! Check your email to confirm, "
-                f"then sign in with your email and password."
+                "Account created! Check your email to confirm, "
+                "then sign in with your email and password."
             )
 
     except Exception as e:
