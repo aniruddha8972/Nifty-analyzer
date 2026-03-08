@@ -214,31 +214,58 @@ def test_admin_list_users_handles_error():
 def test_admin_delete_blocks_admin():
     from backend.db_init import admin_delete_user
     mc = _make_mock_client()
-    mc.rpc.return_value.execute.side_effect = Exception("Cannot delete an admin account")
+    # profile select returns is_admin=True
+    mc.table.return_value.select.return_value.eq.return_value.single.return_value         .execute.return_value = MagicMock(data={"is_admin": True})
     with patch("backend.db_init._get_client", return_value=mc):
         ok, msg = admin_delete_user("tok", "admin-uuid")
     expect(not ok, "Should block deletion of admin")
     expect("cannot delete" in msg.lower() or "admin" in msg.lower(), f"Msg: {msg}")
 
-def test_admin_delete_regular_user():
+def test_admin_delete_regular_user_full():
+    """Full delete: profile + portfolio + auth.users via Admin API."""
     from backend.db_init import admin_delete_user
     mc = _make_mock_client()
-    mc.rpc.return_value.execute.return_value = MagicMock(data="deleted")
+    mc.table.return_value.select.return_value.eq.return_value.single.return_value         .execute.return_value = MagicMock(data={"is_admin": False})
     with patch("backend.db_init._get_client", return_value=mc):
-        ok, msg = admin_delete_user("tok", "user-uuid")
-    expect(ok, f"Should succeed for regular user: {msg}")
-    expect("deleted" in msg.lower(), f"Should confirm deletion: {msg}")
+        with patch("backend.db_init._delete_auth_user", return_value=None) as mock_auth_del:
+            ok, msg = admin_delete_user("tok", "user-uuid")
+    expect(ok, f"Should succeed: {msg}")
+    expect(msg == "auth", f"Full delete should return 'auth': {msg}")
+    mock_auth_del.assert_called_once_with("user-uuid")
 
 def test_admin_delete_removes_auth_user():
-    """Verify delete calls the RPC that removes from auth.users."""
+    """Verify _delete_auth_user calls the Supabase Admin API correctly."""
+    import urllib.request
+    from unittest.mock import patch, MagicMock
+    mock_resp = MagicMock()
+    mock_resp.status = 200
+    mock_resp.__enter__ = lambda s, *a: mock_resp
+    mock_resp.__exit__ = lambda s, *a: None
+    mock_st = MagicMock()
+    mock_st.secrets = {"supabase": {
+        "url": "https://abc.supabase.co",
+        "service_role_key": "svc-key-123"
+    }}
+    import backend.db_init as db
+    orig_st = db.st
+    db.st = mock_st
+    try:
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            db._delete_auth_user("user-uuid-123")
+    finally:
+        db.st = orig_st
+
+def test_admin_delete_no_service_key_warns():
+    """Without service_role_key, delete still removes profile but warns."""
     from backend.db_init import admin_delete_user
     mc = _make_mock_client()
-    mc.rpc.return_value.execute.return_value = MagicMock(data="deleted")
+    mc.table.return_value.select.return_value.eq.return_value.single.return_value         .execute.return_value = MagicMock(data={"is_admin": False})
     with patch("backend.db_init._get_client", return_value=mc):
-        admin_delete_user("tok", "user-uuid")
-    rpc_calls = [str(c) for c in mc.rpc.call_args_list]
-    expect(any("admin_delete_user_full" in c for c in rpc_calls),
-           f"Must call admin_delete_user_full RPC. Calls: {rpc_calls}")
+        with patch("backend.db_init._delete_auth_user",
+                   side_effect=ValueError("service_role_key not set")):
+            ok, msg = admin_delete_user("tok", "user-uuid")
+    expect(ok, "Should still return True (profile was deleted)")
+    expect("profile_only" in msg, f"Should warn about partial delete: {msg}")
 
 def test_admin_toggle_admin():
     from backend.db_init import admin_toggle_admin
@@ -271,7 +298,7 @@ def test_admin_create_user_success():
     )
     with patch("backend.db_init._get_client", return_value=mc):
         with patch("backend.auth._get_supabase_client", return_value=mc):
-            ok, msg = admin_create_user("tok", "newuser", "New User", "new@test.com", "pass123")
+            ok, msg = admin_create_user("tok", "newuser", "New User", "new@test.com", "TestP@ss99")
     expect(ok, f"Create user should succeed: {msg}")
 
 def test_admin_create_user_short_password():
@@ -288,9 +315,10 @@ def test_admin_create_user_short_password():
 
 test("ADMIN_OPS — list_users returns list",        test_admin_list_users_returns_list)
 test("ADMIN_OPS — list_users handles DB error",    test_admin_list_users_handles_error)
-test("ADMIN_OPS — delete blocks admin account",    test_admin_delete_blocks_admin)
-test("ADMIN_OPS — delete regular user works",      test_admin_delete_regular_user)
-test("ADMIN_OPS — delete calls auth RPC",          test_admin_delete_removes_auth_user)
+test("ADMIN_OPS — delete blocks admin account",         test_admin_delete_blocks_admin)
+test("ADMIN_OPS — delete full removes auth user",       test_admin_delete_regular_user_full)
+test("ADMIN_OPS — delete calls Admin API correctly",    test_admin_delete_removes_auth_user)
+test("ADMIN_OPS — no service key warns gracefully",     test_admin_delete_no_service_key_warns)
 test("ADMIN_OPS — toggle admin flag works",        test_admin_toggle_admin)
 test("ADMIN_OPS — get portfolio returns dict",     test_admin_get_portfolio)
 test("ADMIN_OPS — get portfolio handles error",    test_admin_get_portfolio_handles_error)
@@ -338,7 +366,7 @@ def test_sb_register_username_taken_format():
     mc.table.return_value.select.return_value.eq.return_value.execute.return_value \
         = MagicMock(data=[{"username": "rahul"}])
     with patch("backend.auth._get_supabase_client", return_value=mc):
-        ok, msg = _sb_register("rahul", "Rahul S", "r@r.com", "password123")
+        ok, msg = _sb_register("rahul", "Rahul S", "r@r.com", "TestP@ss99")
     expect(not ok, "Should fail when username taken")
     expect("taken" in msg.lower() or "USERNAME_TAKEN" in msg,
            f"Message should indicate username taken: '{msg}'")
@@ -355,18 +383,18 @@ def test_sb_register_email_exists():
         MagicMock(data=[{"email": "r@r.com"}]),  # email check: taken
     ]
     with patch("backend.auth._get_supabase_client", return_value=mc):
-        ok, msg = _sb_register("newuser", "New", "r@r.com", "password123")
+        ok, msg = _sb_register("newuser", "New", "r@r.com", "TestP@ss99")
     expect(not ok, "Should fail when email exists")
 
 def test_sb_register_validation_username():
     from backend.auth import _sb_register
-    ok, msg = _sb_register("ab", "Test", "t@t.com", "pass123")  # too short
+    ok, msg = _sb_register("ab", "Test", "t@t.com", "TestP@ss99")  # too short
     expect(not ok)
     expect("username" in msg.lower(), f"Should mention username: {msg}")
 
 def test_sb_register_validation_email():
     from backend.auth import _sb_register
-    ok, msg = _sb_register("validuser", "Test", "not-an-email", "pass123")
+    ok, msg = _sb_register("validuser", "Test", "not-an-email", "TestP@ss99")
     expect(not ok)
     expect("email" in msg.lower(), f"Should mention email: {msg}")
 
@@ -475,8 +503,8 @@ def test_local_register_username_taken():
         au._PORTFOLIO_DIR.mkdir()
         au._USERS_FILE.write_text("{}")
 
-        ok1, _ = au._local_register("testuser", "Test", "t@t.com", "pass123")
-        ok2, msg2 = au._local_register("testuser", "Test2", "t2@t.com", "pass123")
+        ok1, _ = au._local_register("testuser", "Test", "t@t.com", "TestP@ss99")
+        ok2, msg2 = au._local_register("testuser", "Test2", "t2@t.com", "TestP@ss99")
 
         au._BASE          = orig_base
         au._USERS_FILE    = orig_base / "users.json"
@@ -498,8 +526,8 @@ def test_local_register_email_taken():
         au._PORTFOLIO_DIR.mkdir()
         au._USERS_FILE.write_text("{}")
 
-        au._local_register("user1", "User 1", "same@t.com", "pass123")
-        ok2, msg2 = au._local_register("user2", "User 2", "same@t.com", "pass123")
+        au._local_register("user1", "User 1", "same@t.com", "TestP@ss99")
+        ok2, msg2 = au._local_register("user2", "User 2", "same@t.com", "TestP@ss99")
 
         au._BASE = orig_base
         au._USERS_FILE    = orig_base / "users.json"
@@ -510,9 +538,9 @@ def test_local_register_email_taken():
 
 def test_local_register_invalid_username():
     from backend.auth import _local_register
-    ok, msg = _local_register("ab", "Test", "t@t.com", "pass123")
+    ok, msg = _local_register("ab", "Test", "t@t.com", "TestP@ss99")
     expect(not ok)
-    ok2, msg2 = _local_register("has space", "Test", "t@t.com", "pass123")
+    ok2, msg2 = _local_register("has space", "Test", "t@t.com", "TestP@ss99")
     expect(not ok2)
 
 def test_local_login_by_email():
@@ -527,8 +555,8 @@ def test_local_login_by_email():
         au._PORTFOLIO_DIR.mkdir()
         au._USERS_FILE.write_text("{}")
 
-        au._local_register("myuser", "My User", "my@email.com", "mypass")
-        ok, msg, info = au._local_login("my@email.com", "mypass")
+        au._local_register("myuser", "My User", "my@email.com", "TestP@ss99")
+        ok, msg, info = au._local_login("my@email.com", "TestP@ss99")
 
         au._BASE          = orig_base
         au._USERS_FILE    = orig_base / "users.json"
