@@ -36,7 +36,7 @@ def _metric(label: str, value: str, color: str = "#eeeef8", sub: str = "") -> st
     return f"""
     <div style="background:#09090f;border:1px solid #1c1c2e;border-radius:8px;
                 padding:14px 16px;text-align:center">
-      <div style="font-family:'DM Sans',sans-serif;font-size:10px;
+      <div style="font-family:'Inter',sans-serif;font-size:10px;
                   letter-spacing:1px;text-transform:uppercase;color:#5a5a78;
                   margin-bottom:6px">{label}</div>
       <div style="font-family:'IBM Plex Mono',monospace;font-size:18px;
@@ -106,8 +106,8 @@ def render_heatmap_tab(stock_data: list[dict]) -> None:
         )
 
         fig.update_layout(
-            paper_bgcolor="#050508",
-            plot_bgcolor="#050508",
+            paper_bgcolor="#04040a",
+            plot_bgcolor="#04040a",
             margin=dict(t=10, l=0, r=0, b=0),
             height=460,
             coloraxis_colorbar=dict(
@@ -118,7 +118,7 @@ def render_heatmap_tab(stock_data: list[dict]) -> None:
                 bordercolor="#1c1c2e",
                 len=0.8,
             ),
-            font=dict(family="DM Sans", color="#eeeef8"),
+            font=dict(family="Inter", color="#eeeef8"),
         )
 
         st.plotly_chart(fig, key="heatmap_treemap")
@@ -192,7 +192,7 @@ def render_backtest_tab() -> None:
 
     st.markdown("""
     <div style="background:#0a1a10;border:1px solid #1a3a28;border-radius:8px;
-                padding:12px 16px;margin-bottom:16px;font-family:'DM Sans',sans-serif;
+                padding:12px 16px;margin-bottom:16px;font-family:'Inter',sans-serif;
                 font-size:12px;color:#6b6b80">
       ℹ Simulates buying every BUY signal on historical data using only past data at each point.
       Scores are a lightweight version of the full ML ensemble.
@@ -294,12 +294,12 @@ def _render_backtest_results(result: dict) -> None:
             ))
             fig.add_hline(y=0, line_dash="dot", line_color="#33334a", line_width=1)
             fig.update_layout(
-                paper_bgcolor="#050508", plot_bgcolor="#050508",
+                paper_bgcolor="#04040a", plot_bgcolor="#04040a",
                 height=260, margin=dict(t=10, l=0, r=0, b=0),
                 xaxis=dict(gridcolor="#1c1c2e", color="#6b6b80"),
                 yaxis=dict(gridcolor="#1c1c2e", color="#6b6b80",
                            title="Cumulative Return %"),
-                font=dict(family="DM Sans", color="#6b6b80"),
+                font=dict(family="Inter", color="#6b6b80"),
                 showlegend=False,
             )
             st.plotly_chart(fig, key="backtest_equity")
@@ -407,9 +407,9 @@ def render_correlation_tab(portfolio_symbols: list[str] | None = None) -> None:
                             letter-spacing:2px;color:#5a5a78;text-transform:uppercase">
                   Your Portfolio Diversification Score
                 </div>
-                <div style="font-family:'DM Sans',sans-serif;font-size:13px;
+                <div style="font-family:'Inter',sans-serif;font-size:13px;
                             color:#eeeef8;margin-top:4px">{div['message']}</div>
-                <div style="font-family:'DM Sans',sans-serif;font-size:11px;
+                <div style="font-family:'Inter',sans-serif;font-size:11px;
                             color:#5a5a78;margin-top:2px">
                   Avg pairwise correlation: {div['avg_correlation']:.3f}
                 </div>
@@ -443,11 +443,11 @@ def render_correlation_tab(portfolio_symbols: list[str] | None = None) -> None:
             ),
         ))
         fig.update_layout(
-            paper_bgcolor="#050508", plot_bgcolor="#050508",
+            paper_bgcolor="#04040a", plot_bgcolor="#04040a",
             height=600, margin=dict(t=10, l=0, r=0, b=0),
             xaxis=dict(tickfont=dict(size=8, color="#6b6b80"), tickangle=45),
             yaxis=dict(tickfont=dict(size=8, color="#6b6b80")),
-            font=dict(family="DM Sans"),
+            font=dict(family="Inter"),
         )
         st.plotly_chart(fig, key="corr_heatmap")
     except ImportError:
@@ -619,7 +619,7 @@ def _render_month_grid(year: int, month: int,
     for week in cal:
         for day_num in week:
             if day_num == 0:
-                cells += '<div style="background:#050508;border-radius:4px;min-height:52px"></div>'
+                cells += '<div style="background:#04040a;border-radius:4px;min-height:52px"></div>'
                 continue
 
             d          = date(year, month, day_num)

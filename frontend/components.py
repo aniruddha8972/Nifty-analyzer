@@ -8,17 +8,18 @@ import streamlit as st
 
 # ── App header ─────────────────────────────────────────────────────────────────
 
-def render_header(label: str = "") -> None:
+def render_header(label: str = "", index_name: str = "Nifty 50", stock_count: int = 50) -> None:
+    import streamlit as _st
     date_html = (
         f'<div class="app-range">📅 {label}</div>' if label else ""
     )
-    st.markdown(f"""
+    _st.markdown(f"""
     <div class="app-header">
-      <div class="app-wordmark">Nifty 50 · Market Intelligence</div>
-      <div class="app-title">Market Analyzer</div>
+      <div class="app-wordmark">NSE · Market Intelligence</div>
+      <div class="app-title">NSE Market Analyzer</div>
       <div class="app-subtitle">
-        Real NSE data &nbsp;·&nbsp; ML ensemble prediction
-        &nbsp;·&nbsp; Live news sentiment &nbsp;·&nbsp; No API key
+        {index_name} &nbsp;·&nbsp; {stock_count} stocks &nbsp;·&nbsp;
+        ML ensemble prediction &nbsp;·&nbsp; Live news sentiment
       </div>
       {date_html}
     </div>
