@@ -420,21 +420,29 @@ test("DATA    — volatility is non-negative",          test_compute_stats_volat
 # ══════════════════════════════════════════════════════════════════════
 
 def test_ml_feature_vector():
-    """build_dataset should produce a non-empty DataFrame with correct columns."""
+    """build_dataset signature must accept universe_key and universe_json params."""
+    import inspect
     from backend.ml import build_dataset
-    # Needs real download — skip if no network, just check function exists
     expect(callable(build_dataset), "build_dataset not callable")
+    sig = inspect.signature(build_dataset)
+    params = list(sig.parameters.keys())
+    expect("universe_key"  in params, f"build_dataset needs universe_key param, got {params}")
+    expect("universe_json" in params, f"build_dataset needs universe_json param, got {params}")
 
 def test_ml_predict_structure():
-    """predict() must return list of dicts with required keys."""
-    from backend.portfolio import get_portfolio_advice
-    # Use portfolio's version for mock test
+    """predict() must accept optional universe param and return enriched dicts."""
+    import inspect
+    from backend.ml import predict
+    sig = inspect.signature(predict)
+    params = list(sig.parameters.keys())
+    expect("universe" in params, f"predict() needs universe param, got {params}")
+    # Also test portfolio advice using mock data
+    from backend.portfolio import get_portfolio_advice as gpa
     rows = [{"symbol":"RELIANCE","sector":"Energy","qty":10,"avg_buy_price":1300,
              "current_price":1400,"invested":13000,"current_val":14000,
              "pnl":1000,"pnl_pct":7.7,"lots":[]}]
     ml_stats = [{"symbol":"RELIANCE","signal":"🟢 STRONG BUY",
                  "final_score":75,"sentiment":0.2,"predicted_return":2.5}]
-    from backend.portfolio import get_portfolio_advice as gpa
     result = gpa(rows, ml_stats)
     expect(len(result) == 1,         "Expected 1 result")
     expect("advice" in result[0],    "advice key missing")

@@ -433,6 +433,93 @@ test("RUNTIME — app.py has index selector",                      test_index_se
 test("RUNTIME — both backtest+corr call _get_active_universe",   test_all_tabs_respect_index)
 
 
+
+# ════════════════════════════════════════════════════════════════════════
+# SUITE 7 — ML v5: 5-year × 500-stock architecture
+# ════════════════════════════════════════════════════════════════════════
+
+def test_history_years_is_5():
+    from backend.ml import HISTORY_YEARS
+    expect(HISTORY_YEARS == 5, f"HISTORY_YEARS should be 5, got {HISTORY_YEARS}")
+
+def test_build_dataset_accepts_universe_params():
+    import inspect
+    from backend.ml import build_dataset
+    sig = inspect.signature(build_dataset)
+    expect("universe_key"  in sig.parameters, "build_dataset needs universe_key")
+    expect("universe_json" in sig.parameters, "build_dataset needs universe_json")
+
+def test_get_trained_models_keyed_by_universe():
+    import inspect
+    from backend.ml import _get_trained_models
+    sig = inspect.signature(_get_trained_models)
+    expect("universe_key"  in sig.parameters, "_get_trained_models needs universe_key")
+    expect("universe_json" in sig.parameters, "_get_trained_models needs universe_json")
+
+def test_predict_accepts_universe_param():
+    import inspect
+    from backend.ml import predict
+    sig = inspect.signature(predict)
+    expect("universe" in sig.parameters, "predict() needs universe param")
+    default = sig.parameters["universe"].default
+    expect(default is None, f"universe default should be None, got {default}")
+
+def test_predict_universe_defaults_to_stocks():
+    src_txt = (ROOT / "backend/ml.py").read_text()
+    # When universe is None it should fall back to STOCKS
+    expect("universe if universe else STOCKS" in src_txt or
+           "universe or STOCKS" in src_txt,
+           "predict() must fall back to STOCKS when universe is None")
+
+def test_extract_features_returns_ndarray():
+    src_txt = (ROOT / "backend/ml.py").read_text()
+    expect("np.float32" in src_txt, "Dataset should use float32 for memory efficiency")
+    expect("_extract_features_array" in src_txt, "_extract_features_array must exist")
+
+def test_dataset_streaming_del():
+    src_txt = (ROOT / "backend/ml.py").read_text()
+    # Should delete df after feature extraction
+    expect("del df" in src_txt or "del df," in src_txt,
+           "build_dataset should del df after extraction")
+    expect("del arr" in src_txt or "del df, arr" in src_txt or "del df,arr" in src_txt,
+           "build_dataset should del arr after appending")
+
+def test_max_rows_subsampling():
+    src_txt = (ROOT / "backend/ml.py").read_text()
+    expect("MAX_ROWS" in src_txt, "Should have MAX_ROWS cap to limit training time")
+    expect("500_000" in src_txt or "500000" in src_txt, "MAX_ROWS should be 500k")
+
+def test_rf_njobs_minus1():
+    src_txt = (ROOT / "backend/ml.py").read_text()
+    expect("n_jobs=-1" in src_txt, "RF should use n_jobs=-1 for speed on large datasets")
+
+def test_app_passes_universe_to_predict():
+    src_txt = (ROOT / "app.py").read_text()
+    expect("predict(all_stats, universe=_universe)" in src_txt,
+           "app.py must pass universe= to predict()")
+
+def test_5yr_label_in_ml_banner():
+    src_txt = (ROOT / "app.py").read_text()
+    expect("5yr" in src_txt or "5-year" in src_txt or "5yr daily" in src_txt,
+           "ML info banner should mention 5yr history")
+
+def test_universe_key_is_sorted():
+    src_txt = (ROOT / "backend/ml.py").read_text()
+    expect("sorted(" in src_txt, "_universe_key should use sorted() for stability")
+
+test("ML v5 — HISTORY_YEARS is 5",                        test_history_years_is_5)
+test("ML v5 — build_dataset accepts universe params",      test_build_dataset_accepts_universe_params)
+test("ML v5 — _get_trained_models keyed by universe",      test_get_trained_models_keyed_by_universe)
+test("ML v5 — predict() accepts universe param",           test_predict_accepts_universe_param)
+test("ML v5 — predict() falls back to STOCKS when None",   test_predict_universe_defaults_to_stocks)
+test("ML v5 — features extracted as float32 ndarray",     test_extract_features_returns_ndarray)
+test("ML v5 — dataset built by streaming (del df/arr)",    test_dataset_streaming_del)
+test("ML v5 — MAX_ROWS subsampling at 500k",               test_max_rows_subsampling)
+test("ML v5 — RF uses n_jobs=-1",                          test_rf_njobs_minus1)
+test("ML v5 — app.py passes universe to predict()",        test_app_passes_universe_to_predict)
+test("ML v5 — ML banner shows 5yr history",                test_5yr_label_in_ml_banner)
+test("ML v5 — universe_key uses sorted() for stability",   test_universe_key_is_sorted)
+
 # ════════════════════════════════════════════════════════════════════════
 # REPORT
 # ════════════════════════════════════════════════════════════════════════
