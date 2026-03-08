@@ -108,7 +108,7 @@ test("SYNTAX  — all .py files parse without SyntaxError", test_syntax)
 
 
 def test_import_constants():
-    from backend.constants import STOCKS, SECTOR_SCORE, FREE_RSS, POS_WORDS, NEG_WORDS
+    from backend.constants import STOCKS, NIFTY_500, INDEX_UNIVERSE, SECTOR_SCORE, FREE_RSS, POS_WORDS, NEG_WORDS
     expect(len(STOCKS) == 50,       f"Expected 50 stocks, got {len(STOCKS)}")
     expect(len(SECTOR_SCORE) > 0,   "SECTOR_SCORE empty")
     expect(len(FREE_RSS) >= 2,      "Need at least 2 RSS feeds")
@@ -576,6 +576,68 @@ test("CONFIG  — supabase_setup.sql complete",      test_supabase_sql_exists)
 test("CONFIG  — DEPLOY.md guide exists",           test_deploy_guide_exists)
 test("CONFIG  — .streamlit/config.toml present",   test_streamlit_config)
 test("SECURITY— no hardcoded secrets in code",     test_no_hardcoded_secrets)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# SUITE 8 — INDEX UNIVERSE
+# ══════════════════════════════════════════════════════════════════════
+
+def test_nifty50_count():
+    from backend.constants import NIFTY_50
+    expect(len(NIFTY_50) == 50, f"Got {len(NIFTY_50)}")
+
+def test_nifty_next50_count():
+    from backend.constants import NIFTY_NEXT_50
+    expect(len(NIFTY_NEXT_50) == 50, f"Got {len(NIFTY_NEXT_50)}")
+
+def test_nifty100_is_union():
+    from backend.constants import NIFTY_50, NIFTY_NEXT_50, NIFTY_100
+    expect(len(NIFTY_100) == len(NIFTY_50) + len(NIFTY_NEXT_50))
+
+def test_nifty500_large():
+    from backend.constants import NIFTY_500, NIFTY_100
+    expect(len(NIFTY_500) > len(NIFTY_100))
+    expect(len(NIFTY_500) >= 300, f"Got {len(NIFTY_500)}")
+
+def test_index_universe_keys():
+    from backend.constants import INDEX_UNIVERSE, INDEX_OPTIONS
+    for opt in INDEX_OPTIONS:
+        expect(opt in INDEX_UNIVERSE, f"Missing: {opt}")
+
+def test_stocks_compat():
+    from backend.constants import STOCKS, NIFTY_50
+    expect(STOCKS == NIFTY_50)
+
+def test_all_stocks_have_sector():
+    from backend.constants import NIFTY_500
+    for sym, sec in NIFTY_500.items():
+        expect(isinstance(sec, str) and len(sec) > 0, f"{sym} empty sector")
+
+def test_fetch_all_stocks_param():
+    import inspect
+    from backend.data import fetch_all
+    expect("stocks" in inspect.signature(fetch_all).parameters)
+
+def test_index_badge():
+    from backend.constants import INDEX_BADGE, INDEX_OPTIONS
+    for opt in INDEX_OPTIONS:
+        expect(opt in INDEX_BADGE, f"Missing badge: {opt}")
+
+def test_sector_score_coverage():
+    from backend.constants import SECTOR_SCORE, NIFTY_500
+    missing = [s for s in set(NIFTY_500.values()) if s not in SECTOR_SCORE]
+    expect(len(missing) < 10, f"Unmapped sectors: {missing}")
+
+test("UNIVERSE — Nifty 50 has 50 stocks",               test_nifty50_count)
+test("UNIVERSE — Nifty Next 50 has 50 stocks",          test_nifty_next50_count)
+test("UNIVERSE — Nifty 100 = 50 + Next 50",             test_nifty100_is_union)
+test("UNIVERSE — Nifty 500 has 300+ stocks",            test_nifty500_large)
+test("UNIVERSE — INDEX_UNIVERSE has all options",       test_index_universe_keys)
+test("UNIVERSE — STOCKS is backward-compat alias",      test_stocks_compat)
+test("UNIVERSE — all stocks have sector",               test_all_stocks_have_sector)
+test("UNIVERSE — fetch_all has stocks param",           test_fetch_all_stocks_param)
+test("UNIVERSE — INDEX_BADGE has all options",          test_index_badge)
+test("UNIVERSE — SECTOR_SCORE covers new sectors",      test_sector_score_coverage)
 
 # ══════════════════════════════════════════════════════════════════════
 #  REPORT

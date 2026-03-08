@@ -235,7 +235,7 @@ def test_validate_password_rules():
         ("NOLOWER1!",   False),
         ("NoDigit!abc", False),
         ("Short1!",     False),  # 7 chars
-        ("Exactly8!",   False),  # 8 chars but no digit
+        ("Exactly8!",   True),   # 9 chars: E(upper) xactly(lower) 8(digit) !(special) → PASS
         ("Exactly8!1",  True),   # 9 chars, all rules
     ]
     for pw, expected in cases:
