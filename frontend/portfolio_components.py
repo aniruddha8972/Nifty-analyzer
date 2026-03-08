@@ -4,7 +4,7 @@ All reusable UI components for the Portfolio tab.
 """
 
 import streamlit as st
-from backend.constants import STOCKS
+from backend.constants import STOCKS, INDEX_UNIVERSE, NIFTY_500
 
 
 # ── Portfolio summary bar ──────────────────────────────────────────────────────
@@ -189,11 +189,13 @@ def render_holdings_table(rows: list[dict]) -> None:
 
 # ── Add holding form ───────────────────────────────────────────────────────────
 
-def render_add_holding_form() -> tuple | None:
+def render_add_holding_form(universe: dict[str, str] | None = None) -> tuple | None:
     """
     Renders add-holding form. Returns (symbol, qty, price, date) on submit,
     or None if not submitted.
+    universe: {symbol: sector} dict for the active index. Defaults to NIFTY_500.
     """
+    active = universe if universe else NIFTY_500
     st.markdown("""
     <div style="background:#09090f;border:1px solid #1c1c2e;border-radius:10px;
                 padding:20px 24px 16px;margin:16px 0 8px">
@@ -208,7 +210,7 @@ def render_add_holding_form() -> tuple | None:
     with col1:
         symbol = st.selectbox(
             "Stock Symbol",
-            options=sorted(STOCKS.keys()),
+            options=sorted(active.keys()),
             key="pf_symbol",
         )
     with col2:

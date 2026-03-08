@@ -20,6 +20,15 @@ import streamlit as st
 #  SHARED HELPERS
 # ══════════════════════════════════════════════════════════════════════
 
+
+def _get_active_universe() -> dict:
+    """Return stock universe for the currently selected index."""
+    import streamlit as _st
+    from backend.constants import INDEX_UNIVERSE, NIFTY_50
+    idx = _st.session_state.get("selected_index", "Nifty 50")
+    return INDEX_UNIVERSE.get(idx, NIFTY_50)
+
+
 def _section(title: str, subtitle: str = "") -> None:
     sub_html = f'<span style="font-size:11px;color:#5a5a78;margin-left:12px">{subtitle}</span>' if subtitle else ""
     st.markdown(f"""
@@ -183,12 +192,14 @@ def _render_sector_cards(summary: list[dict]) -> None:
 # ══════════════════════════════════════════════════════════════════════
 
 def render_backtest_tab() -> None:
-    """Backtest UI — strategy config + results."""
+    """Backtest UI — uses active index universe from session state."""
     from backend.analytics import run_backtest
     from backend.data import fetch_ohlcv
-    from backend.constants import STOCKS
-
-    _section("Backtest Engine", "Walk-forward simulation on 3yr historical data")
+    _universe  = _get_active_universe()
+    _idx_name  = __import__("streamlit").session_state.get("selected_index", "Nifty 50")
+    _idx_count = len(_universe)
+    _section("Backtest Engine",
+             f"Walk-forward simulation · {_idx_name} ({_idx_count} stocks) · 3yr history")
 
     st.markdown("""
     <div style="background:#0a1a10;border:1px solid #1a3a28;border-radius:8px;
@@ -222,14 +233,14 @@ def render_backtest_tab() -> None:
         return
 
     if run_btn:
-        with st.spinner("Running backtest on 3 years of historical data…"):
+        with st.spinner(f"Running backtest on {_idx_count} stocks ({_idx_name}) · 3yr history…"):
             # Fetch 3yr OHLCV for each stock
             from datetime import date, timedelta
             end   = date.today()
             start = end - timedelta(days=3 * 365)
             cache = {}
             prog  = st.progress(0)
-            syms  = list(STOCKS.keys())
+            syms  = list(_universe.keys())
             for i, sym in enumerate(syms):
                 df = fetch_ohlcv(sym, str(start), str(end + timedelta(days=1)))
                 if not df.empty:
@@ -342,15 +353,17 @@ def _render_backtest_results(result: dict) -> None:
 # ══════════════════════════════════════════════════════════════════════
 
 def render_correlation_tab(portfolio_symbols: list[str] | None = None) -> None:
-    """Correlation matrix + diversification score."""
+    """Correlation matrix + diversification — uses active index universe."""
     from backend.analytics import (
         build_correlation_matrix, get_top_correlations,
         get_portfolio_diversification
     )
     from backend.data import fetch_ohlcv
-    from backend.constants import STOCKS
-
-    _section("Correlation Matrix", "1-year daily return correlations across all 50 stocks")
+    _universe  = _get_active_universe()
+    _idx_name  = __import__("streamlit").session_state.get("selected_index", "Nifty 50")
+    _idx_count = len(_universe)
+    _section("Correlation Matrix",
+             f"1-year daily return correlations · {_idx_name} ({_idx_count} stocks)")
 
     run_btn = st.button("🔄  Compute Correlations", type="primary", key="corr_run")
 
@@ -358,19 +371,19 @@ def render_correlation_tab(portfolio_symbols: list[str] | None = None) -> None:
         st.markdown("""
         <div style="text-align:center;padding:60px 0;color:#33334a;
                     font-family:'IBM Plex Mono',monospace;font-size:12px">
-          Click Compute Correlations to analyse all 50 stocks (cached for session)
+          Click Compute Correlations to analyse the active index (cached for session)
         </div>
         """, unsafe_allow_html=True)
         return
 
     if run_btn:
-        with st.spinner("Fetching 1 year of data for all 50 stocks…"):
+        with st.spinner(f"Fetching 1 year of data for {_idx_count} stocks ({_idx_name})…"):
             from datetime import date, timedelta
             end   = date.today()
             start = end - timedelta(days=365)
             cache = {}
             prog  = st.progress(0)
-            syms  = list(STOCKS.keys())
+            syms  = list(_universe.keys())
             for i, sym in enumerate(syms):
                 df = fetch_ohlcv(sym, str(start), str(end + timedelta(days=1)))
                 if not df.empty:
