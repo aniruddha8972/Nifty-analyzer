@@ -184,10 +184,16 @@ def render_admin_dashboard() -> None:
                                 if st.button("Yes, delete", key=f"yes_{uid}", type="primary"):
                                     ok, msg = admin_delete_user(token, uid)
                                     if ok:
-                                        if "auth" in msg.lower():
-                                            st.success(f"✅ @{uname} fully deleted (including login credentials)")
+                                        if msg == "auth":
+                                            st.success(f"✅ @{uname} fully deleted — profile, portfolio and login credentials removed")
+                                        elif "profile_only" in msg:
+                                            st.warning(
+                                                f"⚠️ @{uname} profile & portfolio deleted but **login credentials still exist** in Supabase Auth. "
+                                                f"To fix: add `service_role_key` to your Streamlit secrets. "
+                                                f"Get it from Supabase → Project Settings → API → service_role."
+                                            )
                                         else:
-                                            st.warning(f"⚠ @{uname} profile deleted but auth record remains. Run the SQL fix.")
+                                            st.success(f"✅ @{uname} deleted")
                                         st.session_state.pop(f"confirm_del_{uid}", None)
                                         st.rerun()
                                     else:

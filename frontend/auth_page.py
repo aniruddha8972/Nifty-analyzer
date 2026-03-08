@@ -232,11 +232,54 @@ def render_auth_page() -> bool:
 
         col_c, col_d = st.columns(2)
         with col_c:
-            reg_pw  = st.text_input("Password",         placeholder="min 6 chars",
+            reg_pw  = st.text_input("Password",         placeholder="Min 8 chars + A-Z + 0-9 + symbol",
                                     type="password", key="rg_pw")
         with col_d:
             reg_pw2 = st.text_input("Confirm Password", placeholder="repeat password",
                                     type="password", key="rg_pw2")
+
+        # ── Password strength meter ───────────────────────────────────
+        if reg_pw:
+            from backend.auth import validate_password
+            _valid, _fails = validate_password(reg_pw)
+            _met   = 5 - len(_fails)
+            _pct   = _met / 5
+            _color = ("#ef4444" if _pct <= 0.4
+                      else "#f59e0b" if _pct <= 0.6
+                      else "#00e5a0")
+            _label = ("Weak" if _pct <= 0.4
+                      else "Fair" if _pct <= 0.6
+                      else "Strong" if _pct < 1.0
+                      else "Strong")
+            _bar_w = int(_pct * 100)
+            st.markdown(f"""
+            <div style="margin:6px 0 4px">
+              <div style="display:flex;justify-content:space-between;
+                          font-family:'Space Mono',monospace;font-size:9px;
+                          letter-spacing:2px;text-transform:uppercase;
+                          color:#4a4a60;margin-bottom:4px">
+                <span>Password Strength</span>
+                <span style="color:{_color}">{_label}</span>
+              </div>
+              <div style="background:#1a1a28;border-radius:4px;height:4px;">
+                <div style="background:{_color};width:{_bar_w}%;height:4px;
+                            border-radius:4px;transition:width .3s"></div>
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+            if _fails:
+                for _f in _fails:
+                    st.markdown(
+                        f'<div style="font-size:11px;color:#4a4a60;margin:1px 0">'
+                        f'&nbsp;✗&nbsp; {_f}</div>',
+                        unsafe_allow_html=True
+                    )
+            else:
+                st.markdown(
+                    '<div style="font-size:11px;color:#00e5a0;margin:1px 0">'
+                    '&nbsp;✓&nbsp; All requirements met</div>',
+                    unsafe_allow_html=True
+                )
 
         if sb_mode:
             st.markdown("""
