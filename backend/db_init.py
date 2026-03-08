@@ -106,15 +106,32 @@ _SQL_TRIGGER = """
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
 AS $$
+DECLARE
+  base_username TEXT;
+  final_username TEXT;
+  counter INT := 0;
 BEGIN
+  -- Build a safe base username from email prefix
+  base_username := lower(regexp_replace(split_part(NEW.email, '@', 1), '[^a-z0-9_]', '_', 'g'));
+  base_username := substr(base_username, 1, 15);
+  final_username := base_username || '_' || substr(NEW.id::text, 1, 4);
+
+  -- Ensure username is unique (retry with counter if needed)
+  WHILE EXISTS (SELECT 1 FROM public.profiles WHERE username = final_username) LOOP
+    counter := counter + 1;
+    final_username := base_username || '_' || counter::text;
+    IF counter > 99 THEN EXIT; END IF;
+  END LOOP;
+
   INSERT INTO public.profiles (id, username, name, email)
   VALUES (
     NEW.id,
-    lower(split_part(NEW.email, '@', 1)) || '_' || substr(NEW.id::text, 1, 4),
+    final_username,
     coalesce(NEW.raw_user_meta_data->>'name', split_part(NEW.email, '@', 1)),
     NEW.email
   )
-  ON CONFLICT (id) DO NOTHING;
+  ON CONFLICT (id) DO UPDATE SET
+    email = EXCLUDED.email;  -- always update email even if row exists
 
   INSERT INTO public.portfolios (user_id, data)
   VALUES (NEW.id, '{}')
@@ -192,52 +209,38 @@ def _ensure_tables(client) -> dict:
 
 def _seed_admin(client) -> tuple[bool, str]:
     """
-    Create admin account if it doesn't exist.
-    Returns (success, message).
+    Ensure admin profile exists and has is_admin=True.
+    Never calls sign_up() — avoids email rate limits entirely.
+    The admin auth user must be created via SQL (see DEPLOY.md).
     """
     try:
-        # Check if admin already exists in profiles
-        try:
-            res = client.table("profiles") \
-                        .select("id, username, is_admin") \
-                        .eq("email", ADMIN_EMAIL) \
-                        .execute()
-            if res.data:
-                # Already exists — ensure is_admin = true
-                admin_id = res.data[0]["id"]
+        # Check if admin profile row exists
+        res = client.table("profiles") \
+                    .select("id, username, is_admin") \
+                    .eq("email", ADMIN_EMAIL) \
+                    .execute()
+
+        if res.data:
+            admin_id  = res.data[0]["id"]
+            is_admin  = res.data[0].get("is_admin", False)
+            if not is_admin:
+                # Profile exists but admin flag not set — fix it
                 client.table("profiles") \
-                      .update({"is_admin": True}) \
+                      .update({"is_admin": True, "username": ADMIN_USERNAME,
+                               "name": ADMIN_NAME}) \
                       .eq("id", admin_id) \
                       .execute()
-                return True, "admin_exists"
-        except Exception:
-            pass
+            return True, "admin_exists"
 
-        # Create admin auth user
-        res = client.auth.sign_up({
-            "email":    ADMIN_EMAIL,
-            "password": ADMIN_PASSWORD,
-        })
+        # Profile not found — admin not created via SQL yet
+        # Don't call sign_up() — just report it gracefully
+        return False, (
+            "Admin account not found. "
+            "Run the SQL in DEPLOY.md to create it without email rate limits."
+        )
 
-        if not res.user:
-            return False, "Could not create admin auth user"
-
-        uid   = res.user.id
-        token = res.session.access_token if res.session else None
-        ac    = _get_client()
-        if token:
-            ac.postgrest.auth(token)
-
-        # Upsert profile with admin flag
-        ac.table("profiles").upsert({
-            "id":       uid,
-            "username": ADMIN_USERNAME,
-            "name":     ADMIN_NAME,
-            "email":    ADMIN_EMAIL,
-            "is_admin": True,
-        }).execute()
-
-        # Ensure portfolio row exists
+    except Exception as e:
+        return False, f"Admin check error: {e}"
         ac.table("portfolios").upsert({
             "user_id": uid,
             "data":    {},
@@ -311,16 +314,26 @@ def _try_supabase() -> bool:
 # ── Admin helpers (called from admin dashboard) ────────────────────────
 
 def admin_list_users(token: str) -> list[dict]:
-    """Return all users with profile + portfolio summary."""
+    """Return all users. Uses SECURITY DEFINER RPC to bypass RLS."""
     try:
         client = _get_client()
         client.postgrest.auth(token)
+
+        # Try admin RPC first (SECURITY DEFINER — sees all rows regardless of RLS)
+        try:
+            res = client.rpc("admin_get_all_profiles").execute()
+            if res.data is not None:
+                return res.data
+        except Exception:
+            pass
+
+        # Fallback: direct table query
         res = client.table("profiles") \
                     .select("id, username, name, email, is_admin, created_at") \
                     .order("created_at", desc=True) \
                     .execute()
         return res.data or []
-    except Exception as e:
+    except Exception:
         return []
 
 
