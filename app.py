@@ -70,6 +70,7 @@ from backend.ml        import predict, fetch_sentiment, fetch_sentiment_data
 from backend.portfolio import (
     add_holding, remove_holding, fetch_live_prices,
     compute_portfolio_pnl, get_portfolio_advice,
+    _persist, reload_portfolio_from_db,
 )
 from backend.auth import save_user_portfolio, logout as auth_logout, is_supabase_mode
 from frontend.portfolio_components import (
@@ -354,16 +355,46 @@ if run:
 
 # ── Portfolio tab helper (shared between no-data and has-data paths) ───────────
 def _render_portfolio_tab():
-    render_section("My Portfolio", f"Live P&L · ML Advisor · {user.get('name','')}")
+    # ── Header row with Save + Refresh buttons ────────────────────────
+    h_col, save_col, refresh_col = st.columns([6, 1.2, 1.2])
+    with h_col:
+        render_section("My Portfolio", f"Live P&L · ML Advisor · {user.get('name','')}")
+    with save_col:
+        st.markdown("<div style='height:22px'></div>", unsafe_allow_html=True)
+        if st.button("💾  Save", key="pf_save_btn", use_container_width=True, type="primary"):
+            ok, msg = _persist()
+            if ok:
+                st.success(f"✅ Portfolio saved!")
+            else:
+                st.error(f"❌ {msg}")
+    with refresh_col:
+        st.markdown("<div style='height:22px'></div>", unsafe_allow_html=True)
+        if st.button("🔄  Refresh", key="pf_refresh_btn", use_container_width=True):
+            with st.spinner("Loading from cloud…"):
+                ok, msg = reload_portfolio_from_db()
+            if ok:
+                st.success(f"✅ {msg}")
+                st.rerun()
+            else:
+                st.error(f"❌ {msg}")
+
+    # Last saved timestamp
+    last_saved = st.session_state.get("portfolio_last_saved")
+    if last_saved:
+        st.caption(f"Last synced: {last_saved}")
 
     portfolio = st.session_state.get("portfolio", {})
 
-    # Add holding form
+    # ── Add holding form ──────────────────────────────────────────────
     result = render_add_holding_form()
     if result:
         sym, qty, price, buy_date = result
         add_holding(sym, qty, price, buy_date)
-        st.success(f"✓  Added {qty} × {sym} @ ₹{price:,.2f}  —  portfolio saved")
+        ok, msg = _persist()
+        if ok:
+            st.success(f"✅  Added {qty} × {sym} @ ₹{price:,.2f} — saved to cloud")
+        else:
+            st.warning(f"Added {qty} × {sym} locally. Save failed: {msg}")
         st.rerun()
 
     if not portfolio:
@@ -372,46 +403,47 @@ def _render_portfolio_tab():
           <div class="empty-icon">💼</div>
           <div class="empty-title">Portfolio is empty</div>
           <div class="empty-sub">
-            Use the form above to add your first holding.<br>
-            Your portfolio is saved to your account automatically.
+            Add your first stock using the form above.<br>
+            Click <strong>🔄 Refresh</strong> if you have holdings saved in the cloud.
           </div>
         </div>
         """, unsafe_allow_html=True)
         return
 
-    # Fetch live prices
+    # ── Live prices ───────────────────────────────────────────────────
     with st.spinner("Fetching live prices…"):
         live_prices = fetch_live_prices(tuple(portfolio.keys()))
 
-    # P&L
     pnl_rows, totals = compute_portfolio_pnl(portfolio, live_prices)
-
-    # ML advice (uses market data if available)
     ml_stats = st.session_state.get("data")
     pnl_rows = get_portfolio_advice(pnl_rows, ml_stats)
 
-    # Summary
+    # ── Summary bar ───────────────────────────────────────────────────
     render_portfolio_summary_v2(totals)
 
-    # Advice cards
+    # ── ML advice cards ───────────────────────────────────────────────
     render_section("ML Advisor — Priority Actions", f"{len(pnl_rows)} holdings")
     if not ml_stats:
-        st.info("💡  Run Market Analyzer (▶ ANALYSE) to get ML-powered advice for your holdings.")
+        st.info("💡  Run Market Analyzer (▶ ANALYSE) to get ML-powered advice.")
     render_advice_cards(pnl_rows)
 
-    # Holdings table
+    # ── Holdings table ────────────────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
     render_section("Holdings Detail", "live prices · P&L · ML signal")
     render_holdings_table(pnl_rows)
 
-    # Remove holdings
+    # ── Remove holdings ───────────────────────────────────────────────
     to_remove = render_manage_holdings(pnl_rows)
     if to_remove:
         remove_holding(to_remove)
-        st.success(f"✓  Removed {to_remove}  —  portfolio saved")
+        ok, msg = _persist()
+        if ok:
+            st.success(f"✅  Removed {to_remove} — saved to cloud")
+        else:
+            st.warning(f"Removed {to_remove} locally. Save failed: {msg}")
         st.rerun()
 
-    # Import / Export
+    # ── Import / Export ───────────────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
     render_portfolio_io(portfolio)
 
@@ -455,6 +487,7 @@ losers      = sorted(data, key=lambda x: x["change_pct"])
 predictions = sorted(data, key=lambda x: x["final_score"], reverse=True)
 
 render_stat_bar(data)
+
 
 # ── Download report ────────────────────────────────────────────────────────────
 xlsx  = generate(data, gainers[:10], losers[:10], predictions, from_d, to_d)
