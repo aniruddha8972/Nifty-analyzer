@@ -184,7 +184,10 @@ def render_admin_dashboard() -> None:
                                 if st.button("Yes, delete", key=f"yes_{uid}", type="primary"):
                                     ok, msg = admin_delete_user(token, uid)
                                     if ok:
-                                        st.success(f"Deleted @{uname}")
+                                        if "auth" in msg.lower():
+                                            st.success(f"✅ @{uname} fully deleted (including login credentials)")
+                                        else:
+                                            st.warning(f"⚠ @{uname} profile deleted but auth record remains. Run the SQL fix.")
                                         st.session_state.pop(f"confirm_del_{uid}", None)
                                         st.rerun()
                                     else:
