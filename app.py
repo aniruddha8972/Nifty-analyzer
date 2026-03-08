@@ -45,10 +45,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",   # open so user can see profile + logout
 )
 
-# ── DB self-heal — create tables + admin if missing ───────────────────────────
-from backend.db_setup import ensure_db
-ensure_db()
-
 # ── Auth gate ──────────────────────────────────────────────────────────────────
 from frontend.auth_page import render_auth_page
 from frontend.styles    import inject
@@ -87,7 +83,6 @@ from frontend import (
 from pipeline.report import generate
 from frontend.admin_dashboard import render_admin_dashboard
 from backend.auth import is_admin
-from frontend.admin_dashboard import render_admin_dashboard
 from frontend.analytics_components import (
     render_heatmap_tab, render_backtest_tab,
     render_correlation_tab, render_events_tab,
@@ -119,7 +114,7 @@ with st.sidebar:
     # App name
     st.markdown("""
     <div style="padding:12px 0 0">
-      <div style="font-family:'Space Mono',monospace;font-size:10px;
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;
                   letter-spacing:3px;text-transform:uppercase;color:#00e5a0;
                   margin-bottom:16px">
         📊 &nbsp;Nifty 50 Analyzer
@@ -139,45 +134,43 @@ with st.sidebar:
     initials = "".join(w[0].upper() for w in name.split()[:2]) if name != "—" else "?"
 
     st.markdown(f"""
-    <div style="background:#08080e;border:1px solid #1a1a28;border-radius:10px;
-                padding:16px;margin-bottom:16px;position:relative">
+    <div style="background:#09090f;border:1px solid #1c1c2e;border-radius:12px;
+                padding:16px;margin-bottom:12px;position:relative;overflow:hidden">
+      <div style="position:absolute;top:0;left:0;right:0;height:2px;
+                  background:linear-gradient(90deg,#00e5a0,#00a370)"></div>
 
-      <!-- Avatar + name row -->
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-        <div style="width:42px;height:42px;border-radius:50%;
+        <div style="width:40px;height:40px;border-radius:50%;flex-shrink:0;
                     background:linear-gradient(135deg,#00e5a0,#00a370);
                     display:flex;align-items:center;justify-content:center;
-                    font-family:'Space Mono',monospace;font-size:14px;
-                    font-weight:700;color:#050508;flex-shrink:0">
+                    font-family:'IBM Plex Mono',monospace;font-size:14px;
+                    font-weight:700;color:#030306;letter-spacing:-1px">
           {initials}
         </div>
         <div>
-          <div style="font-family:'Space Mono',monospace;font-size:13px;
-                      font-weight:700;color:#e8e8f0;line-height:1.2">{name}</div>
-          <div style="font-family:'DM Sans',sans-serif;font-size:11px;
-                      color:#4a4a60;margin-top:2px">@{username}</div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:13px;
+                      font-weight:700;color:#eeeef8;line-height:1.2">{name}</div>
+          <div style="font-family:'Inter',sans-serif;font-size:10px;
+                      color:#5a5a78;margin-top:2px">@{username}</div>
         </div>
       </div>
 
-      <!-- Details -->
-      <div style="font-family:'DM Sans',sans-serif;font-size:11px;
-                  color:#3a3a4e;line-height:2;border-top:1px solid #1a1a28;
-                  padding-top:10px">
-        <span style="color:#2a2a3e">✉</span>&nbsp; {email}<br>
-        <span style="color:#2a2a3e">📅</span>&nbsp; Joined {joined}<br>
-        <span style="color:#2a2a3e">💼</span>&nbsp;
-          <span style="color:#00e5a0;font-family:'Space Mono',monospace;font-size:11px">
+      <div style="font-family:'Inter',sans-serif;font-size:11px;
+                  color:#33334a;line-height:2;border-top:1px solid #1c1c2e;padding-top:10px">
+        <span style="color:#26263a">✉</span>&nbsp;
+          <span style="color:#5a5a78">{email}</span><br>
+        <span style="color:#26263a">💼</span>&nbsp;
+          <span style="color:#00e5a0;font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600">
             {n_stocks}
-          </span> holding{"s" if n_stocks != 1 else ""}
+          </span>
+          <span style="color:#33334a"> holding{"s" if n_stocks != 1 else ""}</span>
       </div>
 
-      <!-- Backend badge -->
       <div style="margin-top:10px">
-        <span style="font-family:'Space Mono',monospace;font-size:9px;
-                     letter-spacing:1.5px;text-transform:uppercase;
-                     background:rgba(0,229,160,0.07);
-                     border:1px solid rgba(0,229,160,0.15);
-                     color:#00a370;padding:3px 8px;border-radius:3px">
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:8px;
+                     letter-spacing:2px;text-transform:uppercase;
+                     background:rgba(0,229,160,.06);border:1px solid rgba(0,229,160,.18);
+                     color:#00a370;padding:2px 8px;border-radius:4px">
           {mode_badge}
         </span>
       </div>
@@ -187,8 +180,8 @@ with st.sidebar:
     # ── Update Password ────────────────────────────────────────────────
     with st.expander("\U0001f511  Change Password", expanded=False):
         st.markdown(
-            "<div style=\"font-family:Space Mono,monospace;font-size:9px;"
-            "letter-spacing:2px;text-transform:uppercase;color:#4a4a60;margin-bottom:10px\">"
+            "<div style=\"font-family:IBM Plex Mono,monospace;font-size:9px;"
+            "letter-spacing:2px;text-transform:uppercase;color:#5a5a78;margin-bottom:10px\">"
             "Update your login password</div>",
             unsafe_allow_html=True
         )
@@ -207,17 +200,17 @@ with st.sidebar:
             _lbl   = "Weak" if _pct <= 0.4 else "Fair" if _pct < 1.0 else "Strong"
             st.markdown(
                 f"<div style=\"display:flex;justify-content:space-between;"
-                f"font-size:10px;color:#4a4a60;margin:2px 0 3px\">"
+                f"font-size:10px;color:#5a5a78;margin:2px 0 3px\">"
                 f"<span>Strength</span>"
                 f"<span style=\"color:{_col}\">{_lbl}</span></div>"
-                f"<div style=\"background:#1a1a28;border-radius:3px;height:3px\">"
+                f"<div style=\"background:#1c1c2e;border-radius:3px;height:3px\">"
                 f"<div style=\"background:{_col};width:{int(_pct*100)}%;height:3px;border-radius:3px\"></div>"
                 f"</div>",
                 unsafe_allow_html=True
             )
             for _req in _f:
                 st.markdown(
-                    f"<div style=\"font-size:10px;color:#4a4a60;margin:1px 0\">\u2717 {_req}</div>",
+                    f"<div style=\"font-size:10px;color:#5a5a78;margin:1px 0\">\u2717 {_req}</div>",
                     unsafe_allow_html=True
                 )
             if not _f:
@@ -255,7 +248,7 @@ with st.sidebar:
       background: transparent !important;
       border: 1px solid #3a1a1a !important;
       color: #ff4560 !important;
-      font-family: 'Space Mono', monospace !important;
+      font-family: 'IBM Plex Mono', monospace !important;
       font-size: 11px !important;
       letter-spacing: 2px !important;
       height: 42px !important;
@@ -275,9 +268,9 @@ with st.sidebar:
 
     # ── Disclaimer ─────────────────────────────────────────────────────
     st.markdown("""
-    <div style="margin-top:20px;padding-top:14px;border-top:1px solid #1a1a28;
-                font-family:'DM Sans',sans-serif;font-size:10px;
-                color:#2a2a3e;font-style:italic;line-height:1.7">
+    <div style="margin-top:20px;padding-top:14px;border-top:1px solid #1c1c2e;
+                font-family:'Inter',sans-serif;font-size:10px;
+                color:#1c1c2e;font-style:italic;line-height:1.7">
       ⚠ Not financial advice.<br>
       Consult a SEBI-registered advisor<br>
       before making any investment.
@@ -304,16 +297,16 @@ with hcol2:
     <div style="display:flex;align-items:center;justify-content:flex-end;
                 gap:10px;padding-top:18px">
       <div style="text-align:right">
-        <div style="font-family:'Space Mono',monospace;font-size:12px;
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;
                     font-weight:700;color:#e8e8f0">{name}</div>
-        <div style="font-family:'DM Sans',sans-serif;font-size:10px;
-                    color:#4a4a60">@{username}</div>
+        <div style="font-family:'Inter',sans-serif;font-size:10px;
+                    color:#5a5a78">@{username}</div>
       </div>
       <div style="width:36px;height:36px;border-radius:50%;flex-shrink:0;
                   background:linear-gradient(135deg,#00e5a0,#00a370);
                   display:flex;align-items:center;justify-content:center;
-                  font-family:'Space Mono',monospace;font-size:13px;
-                  font-weight:700;color:#050508">
+                  font-family:'IBM Plex Mono',monospace;font-size:13px;
+                  font-weight:700;color:#04040a">
         {initials}
       </div>
     </div>
@@ -338,8 +331,8 @@ today = date.today()
 st.markdown("""
 <div style="background:#0c0c12;border:1px solid #1e1e2e;border-radius:10px;
             padding:20px 24px 16px;margin-bottom:20px">
-  <div style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:3px;
-              text-transform:uppercase;color:#4a4a60;margin-bottom:14px">
+  <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:3px;
+              text-transform:uppercase;color:#5a5a78;margin-bottom:14px">
     ⚙ &nbsp; ANALYSIS CONTROLS
   </div>
 """, unsafe_allow_html=True)
@@ -566,8 +559,8 @@ with col_dl:
     )
 with col_info:
     st.markdown(
-        f'<div style="padding-top:10px;font-family:\'Space Mono\',monospace;'
-        f'font-size:10px;color:#4a4a60">'
+        f'<div style="padding-top:10px;font-family:\'IBM Plex Mono\',monospace;'
+        f'font-size:10px;color:#5a5a78">'
         f'4 sheets · Gainers · Losers · Predictions · Summary · {label}</div>',
         unsafe_allow_html=True,
     )
@@ -609,7 +602,7 @@ with t3:
         st.markdown(
             f'<div style="margin-bottom:16px;padding:10px 16px;'
             f'background:#0a1a10;border:1px solid #1a3a28;border-radius:6px;'
-            f'font-family:\'Space Mono\',monospace;font-size:11px;color:#6b6b80">'
+            f'font-family:\'IBM Plex Mono\',monospace;font-size:11px;color:#6b6b80">'
             f'<span style="color:#00e5a0">✓ {n_rows:,} real training rows</span>'
             f' &nbsp;·&nbsp; 50 stocks × 3yr daily OHLCV'
             f' &nbsp;·&nbsp; {n_feats} features'
