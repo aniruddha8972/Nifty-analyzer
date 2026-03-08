@@ -46,9 +46,8 @@ from sklearn.linear_model import Ridge
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from backend.constants import (
-    FREE_RSS, NEG_WORDS, POS_WORDS, SECTOR_SCORE, STOCKS, INDEX_UNIVERSE
-)
+from backend.constants import SECTOR_SCORE, STOCKS, INDEX_UNIVERSE
+from backend.sentiment import fetch_sentiment_data_v2 as _fetch_sentiment
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 HISTORY_YEARS = 5          # was 3 — now 5
@@ -345,50 +344,17 @@ def _get_trained_models(universe_key: str, universe_json: str):
 
 
 # ══════════════════════════════════════════════════════════════════════
-#  NEWS SENTIMENT — live RSS at prediction time
+#  NEWS SENTIMENT — delegated to backend.sentiment (Google News RSS v2)
 # ══════════════════════════════════════════════════════════════════════
 
-@st.cache_data(ttl=1800, show_spinner=False)
 def fetch_sentiment_data(symbols: tuple) -> dict:
     """
-    Scrape free RSS feeds for each symbol.
-    Returns {sym -> {"score": float, "headlines": [str]}}
-    score is -1.0 to +1.0. Cached 30 min.
+    Proxy to the new Google News RSS engine in backend.sentiment.
+    Returns {sym -> {"score": float, "headlines": [str], "confidence": float,
+                     "n_articles": int, "latest_ts": str}}
+    Caching is handled inside fetch_news_sentiment (30-min @cache_data).
     """
-    import requests
-    from bs4 import BeautifulSoup
-
-    all_items: list[tuple[str, str]] = []
-    for url in FREE_RSS:
-        try:
-            r = requests.get(url, timeout=5, headers={"User-Agent": "Mozilla/5.0"})
-            soup = BeautifulSoup(r.content, "lxml-xml")
-            for tag in soup.find_all("title")[:80]:
-                txt = tag.text.strip()
-                if txt and len(txt) > 10:
-                    all_items.append((txt, txt.lower()))
-        except Exception:
-            pass
-
-    result = {}
-    for sym in symbols:
-        sym_lower = sym.lower()
-        matched = [(d, l) for d, l in all_items if sym_lower in l]
-        if not matched:
-            result[sym] = {"score": 0.0, "headlines": []}
-            continue
-        words = re.findall(r"\b\w+\b", " ".join(l for _, l in matched))
-        p = sum(1 for w in words if w in POS_WORDS)
-        n = sum(1 for w in words if w in NEG_WORDS)
-        score = round((p - n) / (p + n), 2) if (p + n) > 0 else 0.0
-        seen, kept = set(), []
-        for disp, _ in matched:
-            clean = disp.strip()
-            if clean not in seen and len(kept) < 5:
-                seen.add(clean); kept.append(clean)
-        result[sym] = {"score": score, "headlines": kept}
-
-    return result
+    return _fetch_sentiment(symbols)
 
 
 def fetch_sentiment(symbols: tuple) -> dict:
@@ -481,14 +447,25 @@ def predict(stats: list[dict],
     ml_scores = ((raw - mn) / (mx - mn) * 100
                  if mx > mn else np.full(len(stats), 50.0))
 
-    sent_data = fetch_sentiment_data(tuple(s["symbol"] for s in stats))
-    sentiment = {sym: v["score"]    for sym, v in sent_data.items()}
-    headlines = {sym: v["headlines"] for sym, v in sent_data.items()}
+    sent_data  = fetch_sentiment_data(tuple(s["symbol"] for s in stats))
 
     enriched = []
     for s, ml_sc, raw_pred in zip(stats, ml_scores, raw_preds):
-        sent  = sentiment.get(s["symbol"], 0.0)
-        final = round(float(np.clip(ml_sc * 0.80 + sent * 10 + 10, 0, 100)), 1)
+        sym       = s["symbol"]
+        sd        = sent_data.get(sym, {})
+        sent      = sd.get("score",      0.0)
+        conf      = sd.get("confidence", 0.0)
+        n_art     = sd.get("n_articles", 0)
+        latest_ts = sd.get("latest_ts",  "")
+        hdlines   = sd.get("headlines",  [])
+
+        # Confidence-weighted sentiment blend:
+        # If confidence is high (many articles, clear signal) → up to 25% weight
+        # If confidence is low (few articles) → down to 5% weight
+        sent_weight = 0.05 + 0.20 * conf          # 0.05–0.25
+        ml_weight   = 1.0 - sent_weight            # 0.75–0.95
+        raw_blend   = ml_sc * ml_weight + (sent * 50 + 50) * sent_weight
+        final       = round(float(np.clip(raw_blend, 0, 100)), 1)
 
         if   final >= 72: sig, col = "🟢 STRONG BUY", "#10b981"
         elif final >= 55: sig, col = "🟡 BUY",         "#34d399"
@@ -497,16 +474,19 @@ def predict(stats: list[dict],
 
         enriched.append({
             **s,
-            "ml_score":         round(float(ml_sc), 1),
-            "sentiment":        sent,
-            "final_score":      final,
-            "predicted_return": round(float(raw_pred), 2),
-            "signal":           sig,
-            "sig_color":        col,
-            "training_rows":    n_rows,
-            "training_stocks":  n_stocks,
-            "n_features":       len(FEATURE_COLS),
-            "news_headlines":   headlines.get(s["symbol"], []),
+            "ml_score":          round(float(ml_sc), 1),
+            "sentiment":         round(sent, 3),
+            "sent_confidence":   round(conf, 3),
+            "news_count":        n_art,
+            "news_latest":       latest_ts,
+            "final_score":       final,
+            "predicted_return":  round(float(raw_pred), 2),
+            "signal":            sig,
+            "sig_color":         col,
+            "training_rows":     n_rows,
+            "training_stocks":   n_stocks,
+            "n_features":        len(FEATURE_COLS),
+            "news_headlines":    hdlines,
         })
 
     return enriched

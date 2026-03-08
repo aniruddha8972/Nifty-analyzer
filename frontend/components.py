@@ -123,7 +123,7 @@ def render_loser_cards(stocks: list[dict]) -> None:
 
 
 def render_prediction_cards(stocks: list[dict]) -> None:
-    """Render top 5 AI prediction cards."""
+    """Render top 5 AI prediction cards with Google News sentiment."""
     cols = st.columns(5)
     for i, s in enumerate(stocks[:5]):
         with cols[i]:
@@ -131,7 +131,15 @@ def render_prediction_cards(stocks: list[dict]) -> None:
             sent_col  = "#00e5a0" if sent >= 0 else "#ff4560"
             pred_ret  = s.get("predicted_return", 0.0)
             pred_col  = "#00e5a0" if pred_ret >= 0 else "#ff4560"
-            n_rows    = s.get("training_rows", 0)
+            n_art     = s.get("news_count",  0)
+            conf      = s.get("sent_confidence", 0.0)
+            latest_ts = s.get("news_latest", "")
+            conf_col  = "#00e5a0" if conf >= 0.5 else "#f59e0b" if conf >= 0.2 else "#5a5a78"
+            news_line = (
+                f'<span style="color:{conf_col}">{n_art} articles</span>' +
+                (f'<br><span style="font-size:9px;color:#3a3a52">{latest_ts}</span>' if latest_ts else "")
+                if n_art > 0 else '<span style="color:#3a3a52">no recent news</span>'
+            )
             st.markdown(f"""
             <div class="stock-card" style="--accent-color:{s['sig_color']}">
               <div class="card-symbol">{s['symbol']}</div>
@@ -141,7 +149,8 @@ def render_prediction_cards(stocks: list[dict]) -> None:
               <hr class="card-divider">
               <div class="card-detail">
                 10d pred&nbsp;<span style="color:{pred_col}">{pred_ret:+.2f}%</span><br>
-                RSI {s['rsi']:.1f} &middot; Sent <span style="color:{sent_col}">{sent:+.2f}</span>
+                RSI {s['rsi']:.1f} &middot; Sent <span style="color:{sent_col}">{sent:+.2f}</span><br>
+                {news_line}
               </div>
             </div>
             """, unsafe_allow_html=True)
