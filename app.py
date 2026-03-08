@@ -606,6 +606,7 @@ _tabs_main = [
     "📈  Top Gainers", "📉  Top Losers",
     "🤖  AI Predictions", "📋  All Stocks", "💼  My Portfolio",
     "🗺  Heatmap", "📊  Backtest", "🔗  Correlations", "📅  Events",
+    "📰  News Feed",
 ]
 if _is_admin:
     _tabs_main.append("🛡  Admin")
