@@ -82,38 +82,54 @@ def _sb_register(username: str, name: str, email: str, password: str) -> tuple[b
         client = _get_supabase_client()
 
         # 1. Check username availability (public RPC — no auth needed)
-        res = client.rpc("is_username_available", {"uname": username}).execute()
-        if not res.data:
-            return False, "Username already taken — try another"
+        try:
+            res = client.rpc("is_username_available", {"uname": username}).execute()
+            if not res.data:
+                return False, "Username already taken — try another"
+        except Exception:
+            # RPC may not exist yet — skip and let DB unique constraint catch it
+            pass
 
         # 2. Create auth user (Supabase manages the password)
         res = client.auth.sign_up({"email": email, "password": password})
         if not res.user:
             return False, "Could not create account — email may already be registered"
 
-        uid = res.user.id
+        uid   = res.user.id
         token = res.session.access_token if res.session else None
 
-        # 3. Insert profile row (username + name)
-        pf_client = _get_supabase_client(token)
-        pf_client.table("profiles").insert({
+        # 3. Insert profile row
+        # Use authenticated client if we have a token (email confirmation OFF)
+        # Fall back to anon client if no session (email confirmation ON) —
+        # the RLS policy now allows insert for any valid auth.users id.
+        insert_client = _get_supabase_client(token) if token else client
+
+        insert_client.table("profiles").insert({
             "id":       uid,
-            "username": username,
-            "name":     name,
+            "username": username.lower().strip(),
+            "name":     name.strip(),
         }).execute()
 
         # 4. Create empty portfolio row
-        pf_client.table("portfolios").insert({
+        insert_client.table("portfolios").insert({
             "user_id": uid,
             "data":    {},
         }).execute()
 
-        return True, f"Welcome, {name}! Account created."
+        if token:
+            return True, f"Welcome, {name}! Account created. You can sign in now."
+        else:
+            return True, (
+                f"Account created! Check your email to confirm, "
+                f"then sign in with your email and password."
+            )
 
     except Exception as e:
         err = str(e)
         if "already registered" in err.lower() or "already exists" in err.lower():
             return False, "Email already registered — try signing in"
+        if "username" in err.lower() and "unique" in err.lower():
+            return False, "Username already taken — try another"
         return False, f"Registration error: {err}"
 
 
