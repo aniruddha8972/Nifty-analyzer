@@ -295,41 +295,25 @@ def _sb_logout(user_info: dict) -> None:
 
 
 def _sb_load_portfolio(user_info: dict) -> dict:
-    """Load portfolio — tries with auth token, falls back to anon."""
-    uid   = user_info.get("user_id", "")
-    token = user_info.get("access_token", "")
+    """Load portfolio via SECURITY DEFINER RPC — bypasses all RLS."""
+    uid = user_info.get("user_id", "")
     if not uid:
         return {}
-    for client in [_get_supabase_client(token), _get_supabase_client()]:
-        try:
-            res = client.table("portfolios").select("data") \
-                        .eq("user_id", uid).single().execute()
-            if res.data:
-                return res.data.get("data", {}) or {}
-        except Exception:
-            continue
-    return {}
+    from backend.db_init import load_portfolio_rpc
+    data, err = load_portfolio_rpc(uid)
+    return data
 
 
 def _sb_save_portfolio(user_info: dict, portfolio: dict) -> None:
-    """Save portfolio — raises exception on failure so caller can report it."""
-    uid   = user_info.get("user_id", "")
-    token = user_info.get("access_token", "")
+    """Save portfolio via SECURITY DEFINER RPC — bypasses all RLS.
+    Raises on failure so the UI can show the error."""
+    uid = user_info.get("user_id", "")
     if not uid:
-        raise ValueError("No user_id in user_info — not logged in")
-
-    last_err = None
-    for client in [_get_supabase_client(token), _get_supabase_client()]:
-        try:
-            client.table("portfolios").upsert({
-                "user_id": uid,
-                "data":    portfolio,
-            }).execute()
-            return   # success
-        except Exception as e:
-            last_err = e
-            continue
-    raise last_err or Exception("Portfolio save failed — both auth and anon client failed")
+        raise ValueError("No user_id — not logged in")
+    from backend.db_init import save_portfolio_rpc
+    ok, msg = save_portfolio_rpc(uid, portfolio)
+    if not ok:
+        raise Exception(msg)
 
 
 # ══════════════════════════════════════════════════════════════════════
