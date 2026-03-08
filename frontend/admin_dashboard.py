@@ -266,31 +266,52 @@ def render_admin_dashboard() -> None:
     # TAB 3 — PORTFOLIOS OVERVIEW
     # ══════════════════════════════════════════════════════════════════
     with tab_ports:
-        _section("All Portfolios", "Admin view of every user's holdings")
+        ph_col, ref_col = st.columns([8, 1.5])
+        with ph_col:
+            _section("All Portfolios", "Admin view of every user's holdings")
+        with ref_col:
+            st.markdown("<div style='height:22px'></div>", unsafe_allow_html=True)
+            do_refresh = st.button("🔄  Refresh", key="adm_pf_refresh", use_container_width=True)
+            if do_refresh:
+                # Clear cached portfolio data so it reloads below
+                for k in list(st.session_state.keys()):
+                    if k.startswith("adm_pf_cache_"):
+                        del st.session_state[k]
+                st.rerun()
 
         rows = []
         for u in users:
-            pf = admin_get_user_portfolio(token, u.get("id", ""))
+            uid = u.get("id", "")
+            cache_key = f"adm_pf_cache_{uid}"
+            # Cache per user so refresh is explicit, not on every rerun
+            if cache_key not in st.session_state:
+                st.session_state[cache_key] = admin_get_user_portfolio(token, uid)
+            pf = st.session_state[cache_key]
+
             holdings = len(pf)
             total_val = sum(
                 h.get("qty", 0) * h.get("avg_buy_price", 0)
                 for h in pf.values()
             )
             rows.append({
-                "User":        u.get("name", "—"),
-                "Username":    "@" + u.get("username", "—"),
-                "Holdings":    holdings,
+                "User":         u.get("name", "—"),
+                "Username":     "@" + u.get("username", "—"),
+                "Email":        u.get("email", "—"),
+                "Holdings":     holdings,
                 "Approx Value": f"₹{total_val:,.0f}" if total_val else "—",
-                "Role":        "Admin" if u.get("is_admin") else "User",
+                "Role":         "Admin" if u.get("is_admin") else "User",
             })
 
         if rows:
             port_df = pd.DataFrame(rows)
             def _role_color(val):
                 return "color:#f59e0b;font-weight:700" if val == "Admin" else "color:#e8e8f0"
+            def _val_color(val):
+                return "color:#00e5a0" if val != "—" else "color:#4a4a60"
             styled = (
                 port_df.style
                 .map(_role_color, subset=["Role"])
+                .map(_val_color,  subset=["Approx Value"])
                 .set_properties(**{
                     "background-color": "#0c0c12",
                     "color": "#e8e8f0",
