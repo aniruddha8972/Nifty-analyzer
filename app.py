@@ -72,7 +72,7 @@ from backend.portfolio import (
     compute_portfolio_pnl, get_portfolio_advice,
     _persist, reload_portfolio_from_db,
 )
-from backend.auth import save_user_portfolio, logout as auth_logout, is_supabase_mode
+from backend.auth import save_user_portfolio, logout as auth_logout, is_supabase_mode, update_password
 from frontend.portfolio_components import (
     render_portfolio_summary_v2, render_holdings_table,
     render_add_holding_form, render_manage_holdings,
@@ -183,6 +183,70 @@ with st.sidebar:
       </div>
     </div>
     """, unsafe_allow_html=True)
+
+    # ── Update Password ────────────────────────────────────────────────
+    with st.expander("\U0001f511  Change Password", expanded=False):
+        st.markdown(
+            "<div style=\"font-family:Space Mono,monospace;font-size:9px;"
+            "letter-spacing:2px;text-transform:uppercase;color:#4a4a60;margin-bottom:10px\">"
+            "Update your login password</div>",
+            unsafe_allow_html=True
+        )
+        cur_pw  = st.text_input("Current Password",     type="password", key="upd_cur_pw",
+                                 placeholder="Your current password")
+        new_pw  = st.text_input("New Password",         type="password", key="upd_new_pw",
+                                 placeholder="Min 8 chars + A-Z + 0-9 + symbol")
+        conf_pw = st.text_input("Confirm New Password", type="password", key="upd_conf_pw",
+                                 placeholder="Repeat new password")
+
+        if new_pw:
+            from backend.auth import validate_password
+            _v, _f = validate_password(new_pw)
+            _pct   = (5 - len(_f)) / 5
+            _col   = "#ef4444" if _pct <= 0.4 else "#f59e0b" if _pct < 1.0 else "#00e5a0"
+            _lbl   = "Weak" if _pct <= 0.4 else "Fair" if _pct < 1.0 else "Strong"
+            st.markdown(
+                f"<div style=\"display:flex;justify-content:space-between;"
+                f"font-size:10px;color:#4a4a60;margin:2px 0 3px\">"
+                f"<span>Strength</span>"
+                f"<span style=\"color:{_col}\">{_lbl}</span></div>"
+                f"<div style=\"background:#1a1a28;border-radius:3px;height:3px\">"
+                f"<div style=\"background:{_col};width:{int(_pct*100)}%;height:3px;border-radius:3px\"></div>"
+                f"</div>",
+                unsafe_allow_html=True
+            )
+            for _req in _f:
+                st.markdown(
+                    f"<div style=\"font-size:10px;color:#4a4a60;margin:1px 0\">\u2717 {_req}</div>",
+                    unsafe_allow_html=True
+                )
+            if not _f:
+                st.markdown(
+                    "<div style=\"font-size:10px;color:#00e5a0;margin:1px 0\">\u2713 All requirements met</div>",
+                    unsafe_allow_html=True
+                )
+
+        if st.button("Update Password", use_container_width=True,
+                     type="primary", key="upd_pw_btn"):
+            if not cur_pw or not new_pw or not conf_pw:
+                st.error("Please fill in all three fields.")
+            elif new_pw != conf_pw:
+                st.error("New passwords do not match.")
+            elif new_pw == cur_pw:
+                st.error("New password must be different from current.")
+            else:
+                with st.spinner("Updating..."):
+                    _ok, _msg = update_password(
+                        st.session_state.get("user_info", {}),
+                        cur_pw, new_pw
+                    )
+                if _ok:
+                    st.success("\u2705 " + _msg)
+                    for _k in ("upd_cur_pw", "upd_new_pw", "upd_conf_pw"):
+                        st.session_state.pop(_k, None)
+                    st.rerun()
+                else:
+                    st.error("\u274c " + _msg)
 
     # ── Logout button — big, red, unmissable ───────────────────────────
     st.markdown("""
