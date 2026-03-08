@@ -153,16 +153,16 @@ def render_holdings_table(rows: list[dict]) -> None:
             "Qty":          "{:,}",
         }, na_rep="N/A")
         .set_properties(**{
-            "background-color": "#0c0c12",
-            "color":            "#e8e8f0",
-            "border":           "1px solid #1e1e2e",
+            "background-color": "#09090f",
+            "color":            "#eeeef8",
+            "border":           "1px solid #1c1c2e",
             "font-size":        "13px",
         })
         .set_table_styles([
             {"selector": "thead th", "props": [
-                ("background-color", "#050508"),
+                ("background-color", "#04040a"),
                 ("color",            "#00e5a0"),
-                ("font-family",      "'Space Mono', monospace"),
+                ("font-family",      "'IBM Plex Mono', monospace"),
                 ("font-size",        "10px"),
                 ("letter-spacing",   "1.5px"),
                 ("text-transform",   "uppercase"),
@@ -174,7 +174,7 @@ def render_holdings_table(rows: list[dict]) -> None:
             ]},
             {"selector": "td", "props": [
                 ("padding",          "9px 14px"),
-                ("border-bottom",    "1px solid #1a1a28"),
+                ("border-bottom",    "1px solid #1c1c2e"),
             ]},
         ])
     )
@@ -195,10 +195,10 @@ def render_add_holding_form() -> tuple | None:
     or None if not submitted.
     """
     st.markdown("""
-    <div style="background:#0c0c12;border:1px solid #1e1e2e;border-radius:10px;
+    <div style="background:#09090f;border:1px solid #1c1c2e;border-radius:10px;
                 padding:20px 24px 16px;margin:16px 0 8px">
-      <div style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:3px;
-                  text-transform:uppercase;color:#4a4a60;margin-bottom:14px">
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:3px;
+                  text-transform:uppercase;color:#5a5a78;margin-bottom:14px">
         ➕ &nbsp; ADD HOLDING
       </div>
     """, unsafe_allow_html=True)
@@ -256,8 +256,8 @@ def render_manage_holdings(rows: list[dict]) -> str | None:
         return None
 
     st.markdown("""
-    <div style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:3px;
-                text-transform:uppercase;color:#4a4a60;margin:20px 0 8px">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:3px;
+                text-transform:uppercase;color:#5a5a78;margin:20px 0 8px">
       🗑 &nbsp; REMOVE HOLDING
     </div>
     """, unsafe_allow_html=True)
@@ -323,8 +323,8 @@ def render_portfolio_io(portfolio: dict):
     from backend.portfolio import export_portfolio_json, import_portfolio_json
 
     st.markdown("""
-    <div style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:3px;
-                text-transform:uppercase;color:#4a4a60;margin:20px 0 8px">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:3px;
+                text-transform:uppercase;color:#5a5a78;margin:20px 0 8px">
       📁 &nbsp; SAVE / LOAD PORTFOLIO
     </div>
     """, unsafe_allow_html=True)

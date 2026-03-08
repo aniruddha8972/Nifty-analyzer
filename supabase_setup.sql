@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS profiles (
   id          UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
   username    TEXT UNIQUE NOT NULL,
   name        TEXT NOT NULL,
+  email       TEXT,
+  is_admin    BOOLEAN DEFAULT FALSE,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 

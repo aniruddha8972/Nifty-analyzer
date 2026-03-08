@@ -50,6 +50,12 @@ from frontend.auth_page import render_auth_page
 from frontend.styles    import inject
 inject()
 
+# ── Self-healing DB init (creates tables + admin if missing) ──────────────────
+from backend.db_init import ensure_db
+if "db_ready" not in __import__("streamlit").session_state:
+    ensure_db()
+    __import__("streamlit").session_state["db_ready"] = True
+
 if not render_auth_page():
     st.stop()   # not logged in — show nothing else
 
@@ -60,8 +66,9 @@ from backend.ml        import predict, fetch_sentiment, fetch_sentiment_data
 from backend.portfolio import (
     add_holding, remove_holding, fetch_live_prices,
     compute_portfolio_pnl, get_portfolio_advice,
+    _persist, reload_portfolio_from_db,
 )
-from backend.auth import save_user_portfolio, logout as auth_logout, is_supabase_mode
+from backend.auth import save_user_portfolio, logout as auth_logout, is_supabase_mode, update_password
 from frontend.portfolio_components import (
     render_portfolio_summary_v2, render_holdings_table,
     render_add_holding_form, render_manage_holdings,
@@ -74,6 +81,8 @@ from frontend import (
     render_all_stocks_table, render_empty_state,
 )
 from pipeline.report import generate
+from frontend.admin_dashboard import render_admin_dashboard
+from backend.auth import is_admin
 from frontend.analytics_components import (
     render_heatmap_tab, render_backtest_tab,
     render_correlation_tab, render_events_tab,
@@ -105,7 +114,7 @@ with st.sidebar:
     # App name
     st.markdown("""
     <div style="padding:12px 0 0">
-      <div style="font-family:'Space Mono',monospace;font-size:10px;
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;
                   letter-spacing:3px;text-transform:uppercase;color:#00e5a0;
                   margin-bottom:16px">
         📊 &nbsp;Nifty 50 Analyzer
@@ -125,50 +134,112 @@ with st.sidebar:
     initials = "".join(w[0].upper() for w in name.split()[:2]) if name != "—" else "?"
 
     st.markdown(f"""
-    <div style="background:#08080e;border:1px solid #1a1a28;border-radius:10px;
-                padding:16px;margin-bottom:16px;position:relative">
+    <div style="background:#09090f;border:1px solid #1c1c2e;border-radius:12px;
+                padding:16px;margin-bottom:12px;position:relative;overflow:hidden">
+      <div style="position:absolute;top:0;left:0;right:0;height:2px;
+                  background:linear-gradient(90deg,#00e5a0,#00a370)"></div>
 
-      <!-- Avatar + name row -->
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-        <div style="width:42px;height:42px;border-radius:50%;
+        <div style="width:40px;height:40px;border-radius:50%;flex-shrink:0;
                     background:linear-gradient(135deg,#00e5a0,#00a370);
                     display:flex;align-items:center;justify-content:center;
-                    font-family:'Space Mono',monospace;font-size:14px;
-                    font-weight:700;color:#050508;flex-shrink:0">
+                    font-family:'IBM Plex Mono',monospace;font-size:14px;
+                    font-weight:700;color:#030306;letter-spacing:-1px">
           {initials}
         </div>
         <div>
-          <div style="font-family:'Space Mono',monospace;font-size:13px;
-                      font-weight:700;color:#e8e8f0;line-height:1.2">{name}</div>
-          <div style="font-family:'DM Sans',sans-serif;font-size:11px;
-                      color:#4a4a60;margin-top:2px">@{username}</div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:13px;
+                      font-weight:700;color:#eeeef8;line-height:1.2">{name}</div>
+          <div style="font-family:'Inter',sans-serif;font-size:10px;
+                      color:#5a5a78;margin-top:2px">@{username}</div>
         </div>
       </div>
 
-      <!-- Details -->
-      <div style="font-family:'DM Sans',sans-serif;font-size:11px;
-                  color:#3a3a4e;line-height:2;border-top:1px solid #1a1a28;
-                  padding-top:10px">
-        <span style="color:#2a2a3e">✉</span>&nbsp; {email}<br>
-        <span style="color:#2a2a3e">📅</span>&nbsp; Joined {joined}<br>
-        <span style="color:#2a2a3e">💼</span>&nbsp;
-          <span style="color:#00e5a0;font-family:'Space Mono',monospace;font-size:11px">
+      <div style="font-family:'Inter',sans-serif;font-size:11px;
+                  color:#33334a;line-height:2;border-top:1px solid #1c1c2e;padding-top:10px">
+        <span style="color:#26263a">✉</span>&nbsp;
+          <span style="color:#5a5a78">{email}</span><br>
+        <span style="color:#26263a">💼</span>&nbsp;
+          <span style="color:#00e5a0;font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600">
             {n_stocks}
-          </span> holding{"s" if n_stocks != 1 else ""}
+          </span>
+          <span style="color:#33334a"> holding{"s" if n_stocks != 1 else ""}</span>
       </div>
 
-      <!-- Backend badge -->
       <div style="margin-top:10px">
-        <span style="font-family:'Space Mono',monospace;font-size:9px;
-                     letter-spacing:1.5px;text-transform:uppercase;
-                     background:rgba(0,229,160,0.07);
-                     border:1px solid rgba(0,229,160,0.15);
-                     color:#00a370;padding:3px 8px;border-radius:3px">
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:8px;
+                     letter-spacing:2px;text-transform:uppercase;
+                     background:rgba(0,229,160,.06);border:1px solid rgba(0,229,160,.18);
+                     color:#00a370;padding:2px 8px;border-radius:4px">
           {mode_badge}
         </span>
       </div>
     </div>
     """, unsafe_allow_html=True)
+
+    # ── Update Password ────────────────────────────────────────────────
+    with st.expander("\U0001f511  Change Password", expanded=False):
+        st.markdown(
+            "<div style=\"font-family:IBM Plex Mono,monospace;font-size:9px;"
+            "letter-spacing:2px;text-transform:uppercase;color:#5a5a78;margin-bottom:10px\">"
+            "Update your login password</div>",
+            unsafe_allow_html=True
+        )
+        cur_pw  = st.text_input("Current Password",     type="password", key="upd_cur_pw",
+                                 placeholder="Your current password")
+        new_pw  = st.text_input("New Password",         type="password", key="upd_new_pw",
+                                 placeholder="Min 8 chars + A-Z + 0-9 + symbol")
+        conf_pw = st.text_input("Confirm New Password", type="password", key="upd_conf_pw",
+                                 placeholder="Repeat new password")
+
+        if new_pw:
+            from backend.auth import validate_password
+            _v, _f = validate_password(new_pw)
+            _pct   = (5 - len(_f)) / 5
+            _col   = "#ef4444" if _pct <= 0.4 else "#f59e0b" if _pct < 1.0 else "#00e5a0"
+            _lbl   = "Weak" if _pct <= 0.4 else "Fair" if _pct < 1.0 else "Strong"
+            st.markdown(
+                f"<div style=\"display:flex;justify-content:space-between;"
+                f"font-size:10px;color:#5a5a78;margin:2px 0 3px\">"
+                f"<span>Strength</span>"
+                f"<span style=\"color:{_col}\">{_lbl}</span></div>"
+                f"<div style=\"background:#1c1c2e;border-radius:3px;height:3px\">"
+                f"<div style=\"background:{_col};width:{int(_pct*100)}%;height:3px;border-radius:3px\"></div>"
+                f"</div>",
+                unsafe_allow_html=True
+            )
+            for _req in _f:
+                st.markdown(
+                    f"<div style=\"font-size:10px;color:#5a5a78;margin:1px 0\">\u2717 {_req}</div>",
+                    unsafe_allow_html=True
+                )
+            if not _f:
+                st.markdown(
+                    "<div style=\"font-size:10px;color:#00e5a0;margin:1px 0\">\u2713 All requirements met</div>",
+                    unsafe_allow_html=True
+                )
+
+        if st.button("Update Password", use_container_width=True,
+                     type="primary", key="upd_pw_btn"):
+            if not cur_pw or not new_pw or not conf_pw:
+                st.error("Please fill in all three fields.")
+            elif new_pw != conf_pw:
+                st.error("New passwords do not match.")
+            elif new_pw == cur_pw:
+                st.error("New password must be different from current.")
+            else:
+                with st.spinner("Updating..."):
+                    _ok, _msg = update_password(
+                        st.session_state.get("user_info", {}),
+                        cur_pw, new_pw
+                    )
+                if _ok:
+                    st.success("\u2705 " + _msg)
+                    for _k in ("upd_cur_pw", "upd_new_pw", "upd_conf_pw"):
+                        st.session_state.pop(_k, None)
+                    st.rerun()
+                else:
+                    st.error("\u274c " + _msg)
 
     # ── Logout button — big, red, unmissable ───────────────────────────
     st.markdown("""
@@ -177,7 +248,7 @@ with st.sidebar:
       background: transparent !important;
       border: 1px solid #3a1a1a !important;
       color: #ff4560 !important;
-      font-family: 'Space Mono', monospace !important;
+      font-family: 'IBM Plex Mono', monospace !important;
       font-size: 11px !important;
       letter-spacing: 2px !important;
       height: 42px !important;
@@ -197,9 +268,9 @@ with st.sidebar:
 
     # ── Disclaimer ─────────────────────────────────────────────────────
     st.markdown("""
-    <div style="margin-top:20px;padding-top:14px;border-top:1px solid #1a1a28;
-                font-family:'DM Sans',sans-serif;font-size:10px;
-                color:#2a2a3e;font-style:italic;line-height:1.7">
+    <div style="margin-top:20px;padding-top:14px;border-top:1px solid #1c1c2e;
+                font-family:'Inter',sans-serif;font-size:10px;
+                color:#1c1c2e;font-style:italic;line-height:1.7">
       ⚠ Not financial advice.<br>
       Consult a SEBI-registered advisor<br>
       before making any investment.
@@ -226,16 +297,16 @@ with hcol2:
     <div style="display:flex;align-items:center;justify-content:flex-end;
                 gap:10px;padding-top:18px">
       <div style="text-align:right">
-        <div style="font-family:'Space Mono',monospace;font-size:12px;
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;
                     font-weight:700;color:#e8e8f0">{name}</div>
-        <div style="font-family:'DM Sans',sans-serif;font-size:10px;
-                    color:#4a4a60">@{username}</div>
+        <div style="font-family:'Inter',sans-serif;font-size:10px;
+                    color:#5a5a78">@{username}</div>
       </div>
       <div style="width:36px;height:36px;border-radius:50%;flex-shrink:0;
                   background:linear-gradient(135deg,#00e5a0,#00a370);
                   display:flex;align-items:center;justify-content:center;
-                  font-family:'Space Mono',monospace;font-size:13px;
-                  font-weight:700;color:#050508">
+                  font-family:'IBM Plex Mono',monospace;font-size:13px;
+                  font-weight:700;color:#04040a">
         {initials}
       </div>
     </div>
@@ -260,8 +331,8 @@ today = date.today()
 st.markdown("""
 <div style="background:#0c0c12;border:1px solid #1e1e2e;border-radius:10px;
             padding:20px 24px 16px;margin-bottom:20px">
-  <div style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:3px;
-              text-transform:uppercase;color:#4a4a60;margin-bottom:14px">
+  <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:3px;
+              text-transform:uppercase;color:#5a5a78;margin-bottom:14px">
     ⚙ &nbsp; ANALYSIS CONTROLS
   </div>
 """, unsafe_allow_html=True)
@@ -341,16 +412,46 @@ if run:
 
 # ── Portfolio tab helper (shared between no-data and has-data paths) ───────────
 def _render_portfolio_tab():
-    render_section("My Portfolio", f"Live P&L · ML Advisor · {user.get('name','')}")
+    # ── Header row with Save + Refresh buttons ────────────────────────
+    h_col, save_col, refresh_col = st.columns([6, 1.2, 1.2])
+    with h_col:
+        render_section("My Portfolio", f"Live P&L · ML Advisor · {user.get('name','')}")
+    with save_col:
+        st.markdown("<div style='height:22px'></div>", unsafe_allow_html=True)
+        if st.button("💾  Save", key="pf_save_btn", use_container_width=True, type="primary"):
+            ok, msg = _persist()
+            if ok:
+                st.success(f"✅ Portfolio saved!")
+            else:
+                st.error(f"❌ {msg}")
+    with refresh_col:
+        st.markdown("<div style='height:22px'></div>", unsafe_allow_html=True)
+        if st.button("🔄  Refresh", key="pf_refresh_btn", use_container_width=True):
+            with st.spinner("Loading from cloud…"):
+                ok, msg = reload_portfolio_from_db()
+            if ok:
+                st.success(f"✅ {msg}")
+                st.rerun()
+            else:
+                st.error(f"❌ {msg}")
+
+    # Last saved timestamp
+    last_saved = st.session_state.get("portfolio_last_saved")
+    if last_saved:
+        st.caption(f"Last synced: {last_saved}")
 
     portfolio = st.session_state.get("portfolio", {})
 
-    # Add holding form
+    # ── Add holding form ──────────────────────────────────────────────
     result = render_add_holding_form()
     if result:
         sym, qty, price, buy_date = result
         add_holding(sym, qty, price, buy_date)
-        st.success(f"✓  Added {qty} × {sym} @ ₹{price:,.2f}  —  portfolio saved")
+        ok, msg = _persist()
+        if ok:
+            st.success(f"✅  Added {qty} × {sym} @ ₹{price:,.2f} — saved to cloud")
+        else:
+            st.warning(f"Added {qty} × {sym} locally. Save failed: {msg}")
         st.rerun()
 
     if not portfolio:
@@ -359,57 +460,65 @@ def _render_portfolio_tab():
           <div class="empty-icon">💼</div>
           <div class="empty-title">Portfolio is empty</div>
           <div class="empty-sub">
-            Use the form above to add your first holding.<br>
-            Your portfolio is saved to your account automatically.
+            Add your first stock using the form above.<br>
+            Click <strong>🔄 Refresh</strong> if you have holdings saved in the cloud.
           </div>
         </div>
         """, unsafe_allow_html=True)
         return
 
-    # Fetch live prices
+    # ── Live prices ───────────────────────────────────────────────────
     with st.spinner("Fetching live prices…"):
         live_prices = fetch_live_prices(tuple(portfolio.keys()))
 
-    # P&L
     pnl_rows, totals = compute_portfolio_pnl(portfolio, live_prices)
-
-    # ML advice (uses market data if available)
     ml_stats = st.session_state.get("data")
     pnl_rows = get_portfolio_advice(pnl_rows, ml_stats)
 
-    # Summary
+    # ── Summary bar ───────────────────────────────────────────────────
     render_portfolio_summary_v2(totals)
 
-    # Advice cards
+    # ── ML advice cards ───────────────────────────────────────────────
     render_section("ML Advisor — Priority Actions", f"{len(pnl_rows)} holdings")
     if not ml_stats:
-        st.info("💡  Run Market Analyzer (▶ ANALYSE) to get ML-powered advice for your holdings.")
+        st.info("💡  Run Market Analyzer (▶ ANALYSE) to get ML-powered advice.")
     render_advice_cards(pnl_rows)
 
-    # Holdings table
+    # ── Holdings table ────────────────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
     render_section("Holdings Detail", "live prices · P&L · ML signal")
     render_holdings_table(pnl_rows)
 
-    # Remove holdings
+    # ── Remove holdings ───────────────────────────────────────────────
     to_remove = render_manage_holdings(pnl_rows)
     if to_remove:
         remove_holding(to_remove)
-        st.success(f"✓  Removed {to_remove}  —  portfolio saved")
+        ok, msg = _persist()
+        if ok:
+            st.success(f"✅  Removed {to_remove} — saved to cloud")
+        else:
+            st.warning(f"Removed {to_remove} locally. Save failed: {msg}")
         st.rerun()
 
-    # Import / Export
+    # ── Import / Export ───────────────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
     render_portfolio_io(portfolio)
 
 
 # ── No data yet ────────────────────────────────────────────────────────────────
 if not st.session_state["data"]:
-    _t1, _t2, _t3, _t4, _t5, _t6, _t7, _t8, _t9 = st.tabs([
+    _user_info = st.session_state.get("user_info", {})
+    _is_admin  = is_admin(_user_info)
+    _tabs_def  = [
         "📈  Top Gainers", "📉  Top Losers",
         "🤖  AI Predictions", "📋  All Stocks", "💼  My Portfolio",
         "🗺  Heatmap", "📊  Backtest", "🔗  Correlations", "📅  Events",
-    ])
+    ]
+    if _is_admin:
+        _tabs_def.append("🛡  Admin")
+    _tab_objs = st.tabs(_tabs_def)
+    _t1,_t2,_t3,_t4,_t5,_t6,_t7,_t8,_t9 = _tab_objs[:9]
+    _tadmin = _tab_objs[9] if _is_admin else None
     with _t1: render_empty_state()
     with _t2: render_empty_state()
     with _t3: render_empty_state()
@@ -419,6 +528,8 @@ if not st.session_state["data"]:
     with _t7: render_backtest_tab()
     with _t8: render_correlation_tab()
     with _t9: render_events_tab()
+    if _tadmin:
+        with _tadmin: render_admin_dashboard()
     st.stop()
 
 
@@ -448,8 +559,8 @@ with col_dl:
     )
 with col_info:
     st.markdown(
-        f'<div style="padding-top:10px;font-family:\'Space Mono\',monospace;'
-        f'font-size:10px;color:#4a4a60">'
+        f'<div style="padding-top:10px;font-family:\'IBM Plex Mono\',monospace;'
+        f'font-size:10px;color:#5a5a78">'
         f'4 sheets · Gainers · Losers · Predictions · Summary · {label}</div>',
         unsafe_allow_html=True,
     )
@@ -458,17 +569,18 @@ st.markdown("<hr>", unsafe_allow_html=True)
 
 
 # ── Tabs ───────────────────────────────────────────────────────────────────────
-t1, t2, t3, t4, t5, t6, t7, t8, t9 = st.tabs([
-    "📈  Top Gainers",
-    "📉  Top Losers",
-    "🤖  AI Predictions",
-    "📋  All Stocks",
-    "💼  My Portfolio",
-    "🗺  Heatmap",
-    "📊  Backtest",
-    "🔗  Correlations",
-    "📅  Events",
-])
+_user_info = st.session_state.get("user_info", {})
+_is_admin  = is_admin(_user_info)
+_tabs_main = [
+    "📈  Top Gainers", "📉  Top Losers",
+    "🤖  AI Predictions", "📋  All Stocks", "💼  My Portfolio",
+    "🗺  Heatmap", "📊  Backtest", "🔗  Correlations", "📅  Events",
+]
+if _is_admin:
+    _tabs_main.append("🛡  Admin")
+_main_objs = st.tabs(_tabs_main)
+t1,t2,t3,t4,t5,t6,t7,t8,t9 = _main_objs[:9]
+tadmin = _main_objs[9] if _is_admin else None
 
 with t1:
     render_section("Top 10 Gainers", label)
@@ -490,7 +602,7 @@ with t3:
         st.markdown(
             f'<div style="margin-bottom:16px;padding:10px 16px;'
             f'background:#0a1a10;border:1px solid #1a3a28;border-radius:6px;'
-            f'font-family:\'Space Mono\',monospace;font-size:11px;color:#6b6b80">'
+            f'font-family:\'IBM Plex Mono\',monospace;font-size:11px;color:#6b6b80">'
             f'<span style="color:#00e5a0">✓ {n_rows:,} real training rows</span>'
             f' &nbsp;·&nbsp; 50 stocks × 3yr daily OHLCV'
             f' &nbsp;·&nbsp; {n_feats} features'
@@ -524,3 +636,7 @@ with t8:
 
 with t9:
     render_events_tab()
+
+if tadmin:
+    with tadmin:
+        render_admin_dashboard()

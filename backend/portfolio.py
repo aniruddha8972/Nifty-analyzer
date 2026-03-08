@@ -69,11 +69,32 @@ def _get_portfolio() -> dict:
 
 
 def _persist() -> None:
-    """Write current session portfolio to Supabase or local file."""
+    """Write current session portfolio to Supabase or local file. Returns (ok, msg)."""
     user_info = st.session_state.get("user_info", {})
-    if user_info:
+    if not user_info:
+        return False, "Not logged in"
+    try:
         from backend.auth import save_user_portfolio
         save_user_portfolio(user_info, st.session_state["portfolio"])
+        st.session_state["portfolio_last_saved"] = __import__("datetime").datetime.now().strftime("%H:%M:%S")
+        return True, "Saved"
+    except Exception as e:
+        return False, f"Save failed: {e}"
+
+
+def reload_portfolio_from_db() -> tuple[bool, str]:
+    """Force-reload portfolio from Supabase / local file, bypassing session cache."""
+    user_info = st.session_state.get("user_info", {})
+    if not user_info:
+        return False, "Not logged in"
+    try:
+        from backend.auth import load_user_portfolio
+        fresh = load_user_portfolio(user_info)
+        st.session_state["portfolio"] = fresh
+        st.session_state["portfolio_last_saved"] = __import__("datetime").datetime.now().strftime("%H:%M:%S")
+        return True, f"Refreshed — {len(fresh)} holdings loaded"
+    except Exception as e:
+        return False, f"Refresh failed: {e}"
 
 
 def add_holding(symbol: str, qty: int, price: float,
@@ -105,14 +126,14 @@ def add_holding(symbol: str, qty: int, price: float,
             "lots":          [{"date": buy_date, "qty": qty, "price": price}],
         }
     st.session_state["portfolio"] = portfolio
-    _persist()
+    _persist()  # noqa: fire-and-forget in CRUD
 
 
 def remove_holding(symbol: str) -> None:
     portfolio = _get_portfolio()
     portfolio.pop(symbol, None)
     st.session_state["portfolio"] = portfolio
-    _persist()
+    _persist()  # noqa: fire-and-forget in CRUD
 
 
 def update_qty(symbol: str, new_qty: int) -> None:
