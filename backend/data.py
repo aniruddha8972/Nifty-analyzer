@@ -44,10 +44,22 @@ def fetch_nifty(start: str, end: str) -> pd.Series:
     Download Nifty 50 index close prices for the given range.
     Returns a Series indexed by date. Cached 24h.
     """
-    df = _download("^NSEI", start, end)
-    if df.empty or "Close" not in df.columns:
+    try:
+        df = yf.download("^NSEI", start=start, end=end,
+                         auto_adjust=True, progress=False)
+        if df.empty:
+            return pd.Series(dtype=float)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        df.columns = [str(c).strip() for c in df.columns]
+        if "Close" not in df.columns:
+            return pd.Series(dtype=float)
+        cl = df["Close"]
+        if isinstance(cl, pd.DataFrame):
+            cl = cl.iloc[:, 0]
+        return pd.to_numeric(cl, errors="coerce").astype(float).dropna()
+    except Exception:
         return pd.Series(dtype=float)
-    return df["Close"].astype(float)
 
 
 # ── Per-stock OHLCV (cached 1h — user date range) ─────────────────────────────
@@ -58,14 +70,60 @@ def fetch_ohlcv(symbol: str, start: str, end: str) -> pd.DataFrame:
     Single cached yfinance download per (symbol, start, end).
     end = to_date + 1 day because Yahoo's end is exclusive.
     Hard-clips result so no rows beyond to_date leak through.
+
+    Handles yfinance MultiIndex columns robustly:
+      - New yfinance (>=0.2.x) returns (field, ticker) MultiIndex even for 1 ticker
+      - We extract the ticker slice first, then rename to plain field names
+      - Falls back to level-0 strip if ticker slice fails
     """
+    ticker = f"{symbol}.NS"
     try:
-        df = yf.download(f"{symbol}.NS", start=start, end=end,
-                         auto_adjust=True, progress=False)
+        df = yf.download(ticker, start=start, end=end,
+                         auto_adjust=True, progress=False,
+                         group_by="column")
+
+        if df.empty:
+            return pd.DataFrame()
+
+        # ── Flatten MultiIndex columns ────────────────────────────────────
         if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        df = df[df.index <= pd.Timestamp(end) - pd.Timedelta(days=1)]
+            # Level order is (field, ticker) in newer yfinance
+            # Try to extract the ticker slice directly
+            fields     = df.columns.get_level_values(0).unique().tolist()
+            tickers_l1 = df.columns.get_level_values(1).unique().tolist()
+
+            if ticker in tickers_l1:
+                # Standard new-yfinance layout: (field, ticker)
+                df = df.xs(ticker, axis=1, level=1)
+            elif symbol in tickers_l1 or f"{symbol}" in tickers_l1:
+                df = df.xs(symbol, axis=1, level=1)
+            else:
+                # Fallback: just drop the ticker level
+                df.columns = df.columns.get_level_values(0)
+
+        # Normalise column names to plain strings
+        df.columns = [str(c).strip().capitalize() if str(c).strip().lower() in
+                      ("open","high","low","close","volume","adj close")
+                      else str(c).strip()
+                      for c in df.columns]
+
+        # Ensure all OHLCV columns are 1-D Series of scalars (not nested)
+        for col in ("Open", "High", "Low", "Close", "Volume"):
+            if col in df.columns:
+                s = df[col]
+                if isinstance(s, pd.DataFrame):
+                    # Somehow still 2-D — take first column
+                    df[col] = s.iloc[:, 0]
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        df = df.dropna(subset=["Close"])
+
+        # Hard-clip to requested date range
+        cutoff = pd.Timestamp(end) - pd.Timedelta(days=1)
+        df = df[df.index <= cutoff]
+
         return df
+
     except Exception:
         return pd.DataFrame()
 
@@ -93,14 +151,27 @@ def compute_stats(symbol: str, sector: str, df: pd.DataFrame,
     if df.empty or len(df) < 5:
         return None
 
-    cl  = df["Close"].astype(float)
-    hi  = df["High"].astype(float)
-    lo  = df["Low"].astype(float)
-    op  = df["Open"].astype(float)
-    vol = df["Volume"].astype(float)
+    def _col(name: str) -> pd.Series:
+        """Extract a guaranteed 1-D float Series, handles nested DataFrame columns."""
+        s = df[name]
+        if isinstance(s, pd.DataFrame):
+            s = s.iloc[:, 0]
+        return pd.to_numeric(s, errors="coerce").astype(float)
 
-    first_c = float(cl.iloc[0])
-    last_c  = float(cl.iloc[-1])
+    try:
+        cl  = _col("Close")
+        hi  = _col("High")
+        lo  = _col("Low")
+        op  = _col("Open")
+        vol = _col("Volume")
+    except KeyError:
+        return None
+
+    if cl.empty or cl.isna().all():
+        return None
+
+    first_c = float(cl.dropna().iloc[0])
+    last_c  = float(cl.dropna().iloc[-1])
     if first_c == 0:
         return None
 
