@@ -39,7 +39,7 @@ import streamlit as st
 
 # ── Page config — MUST be first Streamlit call ─────────────────────────────────
 st.set_page_config(
-    page_title="Nifty 50 Analyzer",
+    page_title="NSE Market Analyzer",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",   # open so user can see profile + logout
@@ -62,6 +62,7 @@ if not render_auth_page():
 
 # ── All other imports (only reached when logged in) ────────────────────────────
 from backend.data      import fetch_all, fetch_ohlcv
+from backend.constants import INDEX_OPTIONS, INDEX_UNIVERSE, INDEX_BADGE
 from backend.ml        import predict, fetch_sentiment, fetch_sentiment_data
 from backend.portfolio import (
     add_holding, remove_holding, fetch_live_prices,
@@ -90,7 +91,8 @@ from frontend.analytics_components import (
 
 
 # ── Session state defaults ─────────────────────────────────────────────────────
-if "data"   not in st.session_state: st.session_state["data"]   = None
+if "data"           not in st.session_state: st.session_state["data"]           = None
+if "selected_index" not in st.session_state: st.session_state["selected_index"] = "Nifty 50"
 if "from_d" not in st.session_state: st.session_state["from_d"] = None
 if "to_d"   not in st.session_state: st.session_state["to_d"]   = None
 # portfolio is already loaded from disk by render_auth_page → login
@@ -117,7 +119,7 @@ with st.sidebar:
       <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;
                   letter-spacing:3px;text-transform:uppercase;color:#00e5a0;
                   margin-bottom:16px">
-        📊 &nbsp;Nifty 50 Analyzer
+        📊 &nbsp;NSE Market Analyzer
       </div>
     </div>
     """, unsafe_allow_html=True)
@@ -288,7 +290,9 @@ if st.session_state["from_d"] and st.session_state["to_d"]:
 # Header row: title left, user info + logout right
 hcol1, hcol2 = st.columns([7, 3])
 with hcol1:
-    render_header(label)
+    _cur_idx = st.session_state.get("selected_index", "Nifty 50")
+    _cur_uni = INDEX_UNIVERSE.get(_cur_idx, {})
+    render_header(label, index_name=_cur_idx, stock_count=len(_cur_uni))
 with hcol2:
     name     = user.get("name", "")
     username = user.get("username", "")
@@ -337,7 +341,22 @@ st.markdown("""
   </div>
 """, unsafe_allow_html=True)
 
-ctrl_col1, ctrl_col2, ctrl_col3, ctrl_col4, ctrl_col5 = st.columns([2, 2, 2, 1.4, 1.4])
+ctrl_col0, ctrl_col1, ctrl_col2, ctrl_col3, ctrl_col4, ctrl_col5 = st.columns([2.2, 2, 2, 2, 1.4, 1.4])
+
+with ctrl_col0:
+    _prev_idx = st.session_state.get("selected_index", "Nifty 50")
+    selected_index = st.selectbox(
+        "Index / Universe",
+        INDEX_OPTIONS,
+        index=INDEX_OPTIONS.index(_prev_idx),
+        key="idx_sel",
+    )
+    if selected_index != _prev_idx:
+        # Index changed — clear all stale analysis caches
+        for _k in ["data", "from_d", "to_d", "bt_result", "corr_result"]:
+            st.session_state.pop(_k, None)
+        st.session_state["selected_index"] = selected_index
+        st.rerun()
 
 with ctrl_col1:
     preset = st.selectbox(
@@ -389,20 +408,26 @@ if refresh:
 
 # ── Run analysis ───────────────────────────────────────────────────────────────
 if run:
-    prog = st.progress(0, text="Initialising…")
+    _universe   = INDEX_UNIVERSE.get(st.session_state.get("selected_index","Nifty 50"), INDEX_UNIVERSE["Nifty 50"])
+    _idx_label  = st.session_state.get("selected_index", "Nifty 50")
+    _idx_total  = len(_universe)
+    prog = st.progress(0, text=f"Initialising {_idx_label} ({_idx_total} stocks)…")
 
-    def on_progress(i: int, sym: str) -> None:
-        prog.progress((i + 1) / 50, text=f"Fetching  {sym}.NS  ({i+1}/50)")
+    def on_progress(i: int, sym: str, total: int = _idx_total) -> None:
+        prog.progress((i + 1) / total, text=f"Fetching  {sym}.NS  ({i+1}/{total})")
 
-    all_stats = fetch_all(from_d, to_d, on_progress)
+    all_stats = fetch_all(from_d, to_d, on_progress, stocks=_universe)
     prog.empty()
 
     if not all_stats:
         st.error("⚠ No data returned. Check internet connection or try a different date range.")
         st.stop()
 
-    with st.spinner("Training ML on 3-year history (~35,000 rows, 17 features) — first run only, cached after…"):
-        enriched = predict(all_stats)
+    with st.spinner(
+        f"Training ML on {_idx_label} · 5yr history · {len(_universe)} stocks "
+        f"— first run ~60s, then instant from cache…"
+    ):
+        enriched = predict(all_stats, universe=_universe)
 
     st.session_state["data"]   = enriched
     st.session_state["from_d"] = from_d
@@ -443,7 +468,11 @@ def _render_portfolio_tab():
     portfolio = st.session_state.get("portfolio", {})
 
     # ── Add holding form ──────────────────────────────────────────────
-    result = render_add_holding_form()
+    _active_uni = INDEX_UNIVERSE.get(
+        st.session_state.get("selected_index", "Nifty 50"),
+        INDEX_UNIVERSE["Nifty 50"]
+    )
+    result = render_add_holding_form(universe=_active_uni)
     if result:
         sym, qty, price, buy_date = result
         add_holding(sym, qty, price, buy_date)
@@ -596,15 +625,17 @@ with t2:
 
 with t3:
     render_section("AI Predictions", "RF + GB + Ridge · News Sentiment")
-    n_rows  = data[0].get("training_rows", 0) if data else 0
-    n_feats = data[0].get("n_features",    0) if data else 0
+    n_rows   = data[0].get("training_rows",   0) if data else 0
+    n_feats  = data[0].get("n_features",      0) if data else 0
+    n_stocks = data[0].get("training_stocks", 0) if data else 0
+    _cur_idx = st.session_state.get("selected_index", "Nifty 50")
     if n_rows > 0:
         st.markdown(
             f'<div style="margin-bottom:16px;padding:10px 16px;'
             f'background:#0a1a10;border:1px solid #1a3a28;border-radius:6px;'
             f'font-family:\'IBM Plex Mono\',monospace;font-size:11px;color:#6b6b80">'
-            f'<span style="color:#00e5a0">✓ {n_rows:,} real training rows</span>'
-            f' &nbsp;·&nbsp; 50 stocks × 3yr daily OHLCV'
+            f'<span style="color:#00e5a0">✓ {n_rows:,} training rows</span>'
+            f' &nbsp;·&nbsp; {n_stocks} stocks × 5yr daily OHLCV ({_cur_idx})'
             f' &nbsp;·&nbsp; {n_feats} features'
             f' (8 technical + 7 sentiment proxies + 2 market-relative)'
             f' &nbsp;·&nbsp; Target = actual 10-day forward return'
