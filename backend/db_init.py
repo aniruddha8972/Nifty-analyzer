@@ -173,6 +173,29 @@ UPDATE public.profiles p
 SET email = u.email
 FROM auth.users u
 WHERE p.id = u.id AND (p.email IS NULL OR p.email = '');
+
+-- SECURITY DEFINER RPC: fully delete user from auth.users + profiles + portfolios
+-- Requires admin. Runs as postgres so it can delete from auth.users.
+CREATE OR REPLACE FUNCTION public.admin_delete_user_full(p_user_id UUID)
+RETURNS TEXT LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, auth AS $$
+DECLARE
+  caller_is_admin BOOLEAN;
+BEGIN
+  SELECT is_admin INTO caller_is_admin
+  FROM public.profiles WHERE id = auth.uid();
+  IF caller_is_admin IS NOT TRUE THEN
+    RAISE EXCEPTION 'Admin access required';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.profiles WHERE id = p_user_id AND is_admin = TRUE) THEN
+    RAISE EXCEPTION 'Cannot delete an admin account';
+  END IF;
+  DELETE FROM public.portfolios WHERE user_id = p_user_id;
+  DELETE FROM public.profiles WHERE id = p_user_id;
+  DELETE FROM auth.users WHERE id = p_user_id;
+  RETURN 'deleted';
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.admin_delete_user_full TO authenticated;
 """
 
 
@@ -295,15 +318,33 @@ def admin_list_users(token: str) -> list[dict]:
 
 
 def admin_delete_user(token: str, user_id: str) -> tuple[bool, str]:
+    """
+    Fully deletes a user: auth.users + profiles + portfolios.
+    Uses SECURITY DEFINER RPC so auth.users deletion works without service role key.
+    """
     try:
         client = _get_client()
         client.postgrest.auth(token)
-        res = client.table("profiles").select("is_admin").eq("id", user_id).single().execute()
-        if res.data and res.data.get("is_admin"):
-            return False, "Cannot delete the admin account"
+
+        # Try the SECURITY DEFINER RPC first (deletes auth.users too)
+        try:
+            res = client.rpc("admin_delete_user_full", {"p_user_id": user_id}).execute()
+            return True, "User fully deleted (auth + profile + portfolio)"
+        except Exception as rpc_err:
+            err_str = str(rpc_err).lower()
+            if "admin access required" in err_str:
+                return False, "Admin access required"
+            if "cannot delete an admin" in err_str:
+                return False, "Cannot delete the admin account"
+            # RPC not yet deployed — fall back to table-only delete
+            # (auth.users row stays but user can't log in without a profile)
+
+        # Fallback: delete profile + portfolio only
+        # User will get "username not found" on next login attempt
         client.table("portfolios").delete().eq("user_id", user_id).execute()
         client.table("profiles").delete().eq("id", user_id).execute()
-        return True, "User deleted"
+        return True, ("User profile deleted. Run RUN_THIS_IN_SUPABASE.sql "
+                      "to also remove their auth record.")
     except Exception as e:
         return False, f"Delete error: {e}"
 
