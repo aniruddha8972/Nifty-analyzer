@@ -423,8 +423,11 @@ if run:
         st.error("⚠ No data returned. Check internet connection or try a different date range.")
         st.stop()
 
-    with st.spinner(f"Training ML model on {len(_universe)}-stock universe — first run only, cached after…"):
-        enriched = predict(all_stats)
+    with st.spinner(
+        f"Training ML on {_idx_label} · 5yr history · {len(_universe)} stocks "
+        f"— first run ~60s, then instant from cache…"
+    ):
+        enriched = predict(all_stats, universe=_universe)
 
     st.session_state["data"]   = enriched
     st.session_state["from_d"] = from_d
@@ -622,15 +625,17 @@ with t2:
 
 with t3:
     render_section("AI Predictions", "RF + GB + Ridge · News Sentiment")
-    n_rows  = data[0].get("training_rows", 0) if data else 0
-    n_feats = data[0].get("n_features",    0) if data else 0
+    n_rows   = data[0].get("training_rows",   0) if data else 0
+    n_feats  = data[0].get("n_features",      0) if data else 0
+    n_stocks = data[0].get("training_stocks", 0) if data else 0
+    _cur_idx = st.session_state.get("selected_index", "Nifty 50")
     if n_rows > 0:
         st.markdown(
             f'<div style="margin-bottom:16px;padding:10px 16px;'
             f'background:#0a1a10;border:1px solid #1a3a28;border-radius:6px;'
             f'font-family:\'IBM Plex Mono\',monospace;font-size:11px;color:#6b6b80">'
-            f'<span style="color:#00e5a0">✓ {n_rows:,} real training rows</span>'
-            f' &nbsp;·&nbsp; 50 stocks × 3yr daily OHLCV'
+            f'<span style="color:#00e5a0">✓ {n_rows:,} training rows</span>'
+            f' &nbsp;·&nbsp; {n_stocks} stocks × 5yr daily OHLCV ({_cur_idx})'
             f' &nbsp;·&nbsp; {n_feats} features'
             f' (8 technical + 7 sentiment proxies + 2 market-relative)'
             f' &nbsp;·&nbsp; Target = actual 10-day forward return'
