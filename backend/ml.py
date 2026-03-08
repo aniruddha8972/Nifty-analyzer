@@ -52,7 +52,7 @@ from sklearn.linear_model import Ridge
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from backend.constants import FREE_RSS, NEG_WORDS, POS_WORDS, SECTOR_SCORE, STOCKS
+from backend.constants import FREE_RSS, NEG_WORDS, POS_WORDS, SECTOR_SCORE, STOCKS, INDEX_UNIVERSE
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 HISTORY_YEARS = 3

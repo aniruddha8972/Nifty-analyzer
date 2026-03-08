@@ -18,7 +18,7 @@ import pandas as pd
 import streamlit as st
 import yfinance as yf
 
-from backend.constants import STOCKS
+from backend.constants import STOCKS, INDEX_UNIVERSE
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -218,22 +218,26 @@ def compute_stats(symbol: str, sector: str, df: pd.DataFrame,
 
 # ── Batch fetch ────────────────────────────────────────────────────────────────
 
-def fetch_all(from_d: date, to_d: date, progress_callback=None) -> list[dict]:
+def fetch_all(from_d: date, to_d: date,
+              progress_callback=None,
+              stocks: dict[str, str] | None = None) -> list[dict]:
     """
-    Fetch and compute stats for all 50 Nifty stocks.
-    Also fetches Nifty index for market-relative features.
-    Calls progress_callback(i, symbol) on each iteration if provided.
+    Fetch and compute stats for the given stock universe.
+    stocks: dict of {symbol: sector}. Defaults to STOCKS (Nifty 50).
+    Calls progress_callback(i, symbol, total) on each iteration if provided.
     """
-    start = str(from_d)
-    end   = str(to_d + timedelta(days=1))
+    universe = stocks if stocks is not None else STOCKS
+    total    = len(universe)
+    start    = str(from_d)
+    end      = str(to_d + timedelta(days=1))
 
     # Fetch Nifty index for market-relative features
     nifty_cl = fetch_nifty(start, end)
 
     out = []
-    for i, (sym, sec) in enumerate(STOCKS.items()):
+    for i, (sym, sec) in enumerate(universe.items()):
         if progress_callback:
-            progress_callback(i, sym)
+            progress_callback(i, sym, total)
         df  = fetch_ohlcv(sym, start, end)
         row = compute_stats(sym, sec, df, nifty_cl=nifty_cl)
         if row:
