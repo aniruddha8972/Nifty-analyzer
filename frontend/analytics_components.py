@@ -20,6 +20,15 @@ import streamlit as st
 #  SHARED HELPERS
 # ══════════════════════════════════════════════════════════════════════
 
+
+def _get_active_universe() -> dict:
+    """Return stock universe for the currently selected index."""
+    import streamlit as _st
+    from backend.constants import INDEX_UNIVERSE, NIFTY_50
+    idx = _st.session_state.get("selected_index", "Nifty 50")
+    return INDEX_UNIVERSE.get(idx, NIFTY_50)
+
+
 def _section(title: str, subtitle: str = "") -> None:
     sub_html = f'<span style="font-size:11px;color:#5a5a78;margin-left:12px">{subtitle}</span>' if subtitle else ""
     st.markdown(f"""
@@ -36,7 +45,7 @@ def _metric(label: str, value: str, color: str = "#eeeef8", sub: str = "") -> st
     return f"""
     <div style="background:#09090f;border:1px solid #1c1c2e;border-radius:8px;
                 padding:14px 16px;text-align:center">
-      <div style="font-family:'DM Sans',sans-serif;font-size:10px;
+      <div style="font-family:'Inter',sans-serif;font-size:10px;
                   letter-spacing:1px;text-transform:uppercase;color:#5a5a78;
                   margin-bottom:6px">{label}</div>
       <div style="font-family:'IBM Plex Mono',monospace;font-size:18px;
@@ -106,8 +115,8 @@ def render_heatmap_tab(stock_data: list[dict]) -> None:
         )
 
         fig.update_layout(
-            paper_bgcolor="#050508",
-            plot_bgcolor="#050508",
+            paper_bgcolor="#04040a",
+            plot_bgcolor="#04040a",
             margin=dict(t=10, l=0, r=0, b=0),
             height=460,
             coloraxis_colorbar=dict(
@@ -118,7 +127,7 @@ def render_heatmap_tab(stock_data: list[dict]) -> None:
                 bordercolor="#1c1c2e",
                 len=0.8,
             ),
-            font=dict(family="DM Sans", color="#eeeef8"),
+            font=dict(family="Inter", color="#eeeef8"),
         )
 
         st.plotly_chart(fig, key="heatmap_treemap")
@@ -183,16 +192,18 @@ def _render_sector_cards(summary: list[dict]) -> None:
 # ══════════════════════════════════════════════════════════════════════
 
 def render_backtest_tab() -> None:
-    """Backtest UI — strategy config + results."""
+    """Backtest UI — uses active index universe from session state."""
     from backend.analytics import run_backtest
     from backend.data import fetch_ohlcv
-    from backend.constants import STOCKS
-
-    _section("Backtest Engine", "Walk-forward simulation on 3yr historical data")
+    _universe  = _get_active_universe()
+    _idx_name  = __import__("streamlit").session_state.get("selected_index", "Nifty 50")
+    _idx_count = len(_universe)
+    _section("Backtest Engine",
+             f"Walk-forward simulation · {_idx_name} ({_idx_count} stocks) · 3yr history")
 
     st.markdown("""
     <div style="background:#0a1a10;border:1px solid #1a3a28;border-radius:8px;
-                padding:12px 16px;margin-bottom:16px;font-family:'DM Sans',sans-serif;
+                padding:12px 16px;margin-bottom:16px;font-family:'Inter',sans-serif;
                 font-size:12px;color:#6b6b80">
       ℹ Simulates buying every BUY signal on historical data using only past data at each point.
       Scores are a lightweight version of the full ML ensemble.
@@ -222,14 +233,14 @@ def render_backtest_tab() -> None:
         return
 
     if run_btn:
-        with st.spinner("Running backtest on 3 years of historical data…"):
+        with st.spinner(f"Running backtest on {_idx_count} stocks ({_idx_name}) · 3yr history…"):
             # Fetch 3yr OHLCV for each stock
             from datetime import date, timedelta
             end   = date.today()
             start = end - timedelta(days=3 * 365)
             cache = {}
             prog  = st.progress(0)
-            syms  = list(STOCKS.keys())
+            syms  = list(_universe.keys())
             for i, sym in enumerate(syms):
                 df = fetch_ohlcv(sym, str(start), str(end + timedelta(days=1)))
                 if not df.empty:
@@ -294,12 +305,12 @@ def _render_backtest_results(result: dict) -> None:
             ))
             fig.add_hline(y=0, line_dash="dot", line_color="#33334a", line_width=1)
             fig.update_layout(
-                paper_bgcolor="#050508", plot_bgcolor="#050508",
+                paper_bgcolor="#04040a", plot_bgcolor="#04040a",
                 height=260, margin=dict(t=10, l=0, r=0, b=0),
                 xaxis=dict(gridcolor="#1c1c2e", color="#6b6b80"),
                 yaxis=dict(gridcolor="#1c1c2e", color="#6b6b80",
                            title="Cumulative Return %"),
-                font=dict(family="DM Sans", color="#6b6b80"),
+                font=dict(family="Inter", color="#6b6b80"),
                 showlegend=False,
             )
             st.plotly_chart(fig, key="backtest_equity")
@@ -342,15 +353,17 @@ def _render_backtest_results(result: dict) -> None:
 # ══════════════════════════════════════════════════════════════════════
 
 def render_correlation_tab(portfolio_symbols: list[str] | None = None) -> None:
-    """Correlation matrix + diversification score."""
+    """Correlation matrix + diversification — uses active index universe."""
     from backend.analytics import (
         build_correlation_matrix, get_top_correlations,
         get_portfolio_diversification
     )
     from backend.data import fetch_ohlcv
-    from backend.constants import STOCKS
-
-    _section("Correlation Matrix", "1-year daily return correlations across all 50 stocks")
+    _universe  = _get_active_universe()
+    _idx_name  = __import__("streamlit").session_state.get("selected_index", "Nifty 50")
+    _idx_count = len(_universe)
+    _section("Correlation Matrix",
+             f"1-year daily return correlations · {_idx_name} ({_idx_count} stocks)")
 
     run_btn = st.button("🔄  Compute Correlations", type="primary", key="corr_run")
 
@@ -358,19 +371,19 @@ def render_correlation_tab(portfolio_symbols: list[str] | None = None) -> None:
         st.markdown("""
         <div style="text-align:center;padding:60px 0;color:#33334a;
                     font-family:'IBM Plex Mono',monospace;font-size:12px">
-          Click Compute Correlations to analyse all 50 stocks (cached for session)
+          Click Compute Correlations to analyse the active index (cached for session)
         </div>
         """, unsafe_allow_html=True)
         return
 
     if run_btn:
-        with st.spinner("Fetching 1 year of data for all 50 stocks…"):
+        with st.spinner(f"Fetching 1 year of data for {_idx_count} stocks ({_idx_name})…"):
             from datetime import date, timedelta
             end   = date.today()
             start = end - timedelta(days=365)
             cache = {}
             prog  = st.progress(0)
-            syms  = list(STOCKS.keys())
+            syms  = list(_universe.keys())
             for i, sym in enumerate(syms):
                 df = fetch_ohlcv(sym, str(start), str(end + timedelta(days=1)))
                 if not df.empty:
@@ -407,9 +420,9 @@ def render_correlation_tab(portfolio_symbols: list[str] | None = None) -> None:
                             letter-spacing:2px;color:#5a5a78;text-transform:uppercase">
                   Your Portfolio Diversification Score
                 </div>
-                <div style="font-family:'DM Sans',sans-serif;font-size:13px;
+                <div style="font-family:'Inter',sans-serif;font-size:13px;
                             color:#eeeef8;margin-top:4px">{div['message']}</div>
-                <div style="font-family:'DM Sans',sans-serif;font-size:11px;
+                <div style="font-family:'Inter',sans-serif;font-size:11px;
                             color:#5a5a78;margin-top:2px">
                   Avg pairwise correlation: {div['avg_correlation']:.3f}
                 </div>
@@ -443,11 +456,11 @@ def render_correlation_tab(portfolio_symbols: list[str] | None = None) -> None:
             ),
         ))
         fig.update_layout(
-            paper_bgcolor="#050508", plot_bgcolor="#050508",
+            paper_bgcolor="#04040a", plot_bgcolor="#04040a",
             height=600, margin=dict(t=10, l=0, r=0, b=0),
             xaxis=dict(tickfont=dict(size=8, color="#6b6b80"), tickangle=45),
             yaxis=dict(tickfont=dict(size=8, color="#6b6b80")),
-            font=dict(family="DM Sans"),
+            font=dict(family="Inter"),
         )
         st.plotly_chart(fig, key="corr_heatmap")
     except ImportError:
@@ -619,7 +632,7 @@ def _render_month_grid(year: int, month: int,
     for week in cal:
         for day_num in week:
             if day_num == 0:
-                cells += '<div style="background:#050508;border-radius:4px;min-height:52px"></div>'
+                cells += '<div style="background:#04040a;border-radius:4px;min-height:52px"></div>'
                 continue
 
             d          = date(year, month, day_num)
@@ -678,3 +691,209 @@ def _render_month_grid(year: int, month: int,
         f'<div style="margin-top:10px;display:flex;flex-wrap:wrap">{legend}</div>',
         unsafe_allow_html=True,
     )
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  NEWS FEED TAB
+# ══════════════════════════════════════════════════════════════════════
+
+def render_news_tab(data: list[dict]) -> None:
+    """
+    News Feed tab — shows Google News headlines per stock.
+    Only stocks that have at least 1 article in the last 48h are shown.
+    data: list of enriched stat dicts from predict().
+    """
+    import streamlit as st
+    from datetime import datetime, timezone
+
+    _section("Market News Feed",
+             "Google News · last 48h · stocks with coverage only")
+
+    if not data:
+        st.markdown(
+            '<div style="text-align:center;padding:60px 0;color:#33334a;'
+            'font-family:\'IBM Plex Mono\',monospace;font-size:12px">'
+            'Run analysis first to load news.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    # Filter to stocks that have news
+    with_news = [
+        s for s in data
+        if s.get("news_count", 0) > 0 and s.get("news_headlines")
+    ]
+
+    if not with_news:
+        st.markdown(
+            '<div style="text-align:center;padding:60px 0;color:#33334a;'
+            'font-family:\'IBM Plex Mono\',monospace;font-size:12px">'
+            'No recent news found for any stock in the current universe.<br>'
+            'Google News may be rate-limiting — try refreshing in 5 minutes.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    # Sort by news_count desc, then by |sentiment| desc (most newsworthy first)
+    with_news.sort(
+        key=lambda s: (s.get("news_count", 0), abs(s.get("sentiment", 0.0))),
+        reverse=True,
+    )
+
+    # ── Summary bar ───────────────────────────────────────────────────
+    total_articles = sum(s.get("news_count", 0) for s in with_news)
+    pos_stocks = sum(1 for s in with_news if s.get("sentiment", 0) > 0.1)
+    neg_stocks = sum(1 for s in with_news if s.get("sentiment", 0) < -0.1)
+    neu_stocks = len(with_news) - pos_stocks - neg_stocks
+
+    st.markdown(f"""
+    <div style="display:flex;gap:16px;margin-bottom:20px;flex-wrap:wrap">
+      <div style="background:#09090f;border:1px solid #1c1c2e;border-radius:8px;
+                  padding:12px 20px;min-width:120px;text-align:center">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;
+                    letter-spacing:2px;color:#5a5a78;text-transform:uppercase;
+                    margin-bottom:4px">Stocks covered</div>
+        <div style="font-size:22px;font-weight:700;color:#e0e0ff">{len(with_news)}</div>
+      </div>
+      <div style="background:#09090f;border:1px solid #1c1c2e;border-radius:8px;
+                  padding:12px 20px;min-width:120px;text-align:center">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;
+                    letter-spacing:2px;color:#5a5a78;text-transform:uppercase;
+                    margin-bottom:4px">Total articles</div>
+        <div style="font-size:22px;font-weight:700;color:#e0e0ff">{total_articles}</div>
+      </div>
+      <div style="background:#09090f;border:1px solid #1c1c2e;border-radius:8px;
+                  padding:12px 20px;min-width:120px;text-align:center">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;
+                    letter-spacing:2px;color:#5a5a78;text-transform:uppercase;
+                    margin-bottom:4px">Positive tone</div>
+        <div style="font-size:22px;font-weight:700;color:#00e5a0">{pos_stocks}</div>
+      </div>
+      <div style="background:#09090f;border:1px solid #1c1c2e;border-radius:8px;
+                  padding:12px 20px;min-width:120px;text-align:center">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;
+                    letter-spacing:2px;color:#5a5a78;text-transform:uppercase;
+                    margin-bottom:4px">Negative tone</div>
+        <div style="font-size:22px;font-weight:700;color:#ff4560">{neg_stocks}</div>
+      </div>
+      <div style="background:#09090f;border:1px solid #1c1c2e;border-radius:8px;
+                  padding:12px 20px;min-width:120px;text-align:center">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;
+                    letter-spacing:2px;color:#5a5a78;text-transform:uppercase;
+                    margin-bottom:4px">Neutral</div>
+        <div style="font-size:22px;font-weight:700;color:#5a5a78">{neu_stocks}</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── Optional sector filter ─────────────────────────────────────────
+    sectors = sorted({s.get("sector", "Other") for s in with_news})
+    filter_col, search_col = st.columns([2, 3])
+    with filter_col:
+        selected_sector = st.selectbox(
+            "Filter by sector",
+            ["All sectors"] + sectors,
+            key="news_sector_filter",
+        )
+    with search_col:
+        search_sym = st.text_input(
+            "Search symbol",
+            placeholder="e.g. RELIANCE",
+            key="news_sym_search",
+        ).strip().upper()
+
+    if selected_sector != "All sectors":
+        with_news = [s for s in with_news if s.get("sector") == selected_sector]
+    if search_sym:
+        with_news = [s for s in with_news if search_sym in s.get("symbol", "")]
+
+    if not with_news:
+        st.info("No stocks match your filter.")
+        return
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Per-stock news cards ───────────────────────────────────────────
+    for s in with_news:
+        sym       = s.get("symbol", "")
+        sector    = s.get("sector", "")
+        sent      = s.get("sentiment", 0.0)
+        conf      = s.get("sent_confidence", 0.0)
+        n_art     = s.get("news_count", 0)
+        latest_ts = s.get("news_latest", "")
+        headlines = s.get("news_headlines", [])
+        signal    = s.get("signal", "🟠 HOLD")
+        sig_color = s.get("sig_color", "#f59e0b")
+        ml_score  = s.get("final_score", 50.0)
+
+        # Sentiment colour and label
+        if   sent >  0.3: sent_col, sent_label = "#00e5a0", "Positive"
+        elif sent < -0.3: sent_col, sent_label = "#ff4560", "Negative"
+        else:             sent_col, sent_label = "#f59e0b", "Neutral"
+
+        # Confidence bar (filled squares)
+        conf_pct = int(conf * 10)
+        conf_bar = "█" * conf_pct + "░" * (10 - conf_pct)
+
+        # Build headline list HTML
+        hl_items = "".join(
+            f'<li style="margin-bottom:6px;color:#c0c0d8;font-size:13px;'
+            f'font-family:\'Inter\',sans-serif;line-height:1.5">'
+            f'{h}</li>'
+            for h in headlines
+        )
+
+        st.markdown(f"""
+        <div style="background:#09090f;border:1px solid #1c1c2e;
+                    border-left:3px solid {sig_color};
+                    border-radius:10px;padding:16px 20px;margin-bottom:12px">
+
+          <!-- Header row -->
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;
+                      flex-wrap:wrap">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:15px;
+                         font-weight:700;color:#e0e0ff">{sym}</span>
+            <span style="font-size:11px;color:#5a5a78;background:#13131f;
+                         border:1px solid #1c1c2e;border-radius:4px;
+                         padding:2px 8px">{sector}</span>
+            <span style="font-size:11px;color:{sig_color};background:#09090f;
+                         border:1px solid {sig_color}44;border-radius:4px;
+                         padding:2px 8px">{signal}</span>
+            <span style="font-size:11px;color:#5a5a78;margin-left:auto">
+              Score&nbsp;<b style="color:#e0e0ff">{ml_score:.0f}</b>/100
+            </span>
+          </div>
+
+          <!-- Sentiment + stats row -->
+          <div style="display:flex;gap:24px;margin-bottom:12px;flex-wrap:wrap">
+            <div>
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;
+                          letter-spacing:2px;color:#5a5a78;text-transform:uppercase;
+                          margin-bottom:2px">Sentiment</div>
+              <div style="font-size:14px;font-weight:600;color:{sent_col}">
+                {sent:+.3f} &nbsp;<span style="font-size:11px">{sent_label}</span>
+              </div>
+            </div>
+            <div>
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;
+                          letter-spacing:2px;color:#5a5a78;text-transform:uppercase;
+                          margin-bottom:2px">Articles (48h)</div>
+              <div style="font-size:14px;font-weight:600;color:#e0e0ff">{n_art}</div>
+            </div>
+            <div>
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;
+                          letter-spacing:2px;color:#5a5a78;text-transform:uppercase;
+                          margin-bottom:2px">Confidence</div>
+              <div style="font-size:11px;font-family:'IBM Plex Mono',monospace;
+                          color:{sent_col};letter-spacing:1px">{conf_bar}</div>
+            </div>
+            {f'<div><div style="font-family:\'IBM Plex Mono\',monospace;font-size:8px;letter-spacing:2px;color:#5a5a78;text-transform:uppercase;margin-bottom:2px">Latest</div><div style="font-size:11px;color:#5a5a78">{latest_ts}</div></div>' if latest_ts else ''}
+          </div>
+
+          <!-- Headlines -->
+          <ul style="margin:0;padding-left:18px">
+            {hl_items}
+          </ul>
+
+        </div>
+        """, unsafe_allow_html=True)

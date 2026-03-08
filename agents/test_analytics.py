@@ -73,7 +73,7 @@ def expect(cond, msg=""):
         raise AssertionError(msg or "Assertion failed")
 
 # ── Synthetic data helpers ────────────────────────────────────────────────────
-from backend.constants import STOCKS
+from backend.constants import STOCKS, NIFTY_500, INDEX_UNIVERSE, INDEX_OPTIONS
 
 def _make_stock_data(n=20):
     syms = list(STOCKS.keys())[:n]
