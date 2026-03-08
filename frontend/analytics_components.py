@@ -691,3 +691,209 @@ def _render_month_grid(year: int, month: int,
         f'<div style="margin-top:10px;display:flex;flex-wrap:wrap">{legend}</div>',
         unsafe_allow_html=True,
     )
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  NEWS FEED TAB
+# ══════════════════════════════════════════════════════════════════════
+
+def render_news_tab(data: list[dict]) -> None:
+    """
+    News Feed tab — shows Google News headlines per stock.
+    Only stocks that have at least 1 article in the last 48h are shown.
+    data: list of enriched stat dicts from predict().
+    """
+    import streamlit as st
+    from datetime import datetime, timezone
+
+    _section("Market News Feed",
+             "Google News · last 48h · stocks with coverage only")
+
+    if not data:
+        st.markdown(
+            '<div style="text-align:center;padding:60px 0;color:#33334a;'
+            'font-family:\'IBM Plex Mono\',monospace;font-size:12px">'
+            'Run analysis first to load news.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    # Filter to stocks that have news
+    with_news = [
+        s for s in data
+        if s.get("news_count", 0) > 0 and s.get("news_headlines")
+    ]
+
+    if not with_news:
+        st.markdown(
+            '<div style="text-align:center;padding:60px 0;color:#33334a;'
+            'font-family:\'IBM Plex Mono\',monospace;font-size:12px">'
+            'No recent news found for any stock in the current universe.<br>'
+            'Google News may be rate-limiting — try refreshing in 5 minutes.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    # Sort by news_count desc, then by |sentiment| desc (most newsworthy first)
+    with_news.sort(
+        key=lambda s: (s.get("news_count", 0), abs(s.get("sentiment", 0.0))),
+        reverse=True,
+    )
+
+    # ── Summary bar ───────────────────────────────────────────────────
+    total_articles = sum(s.get("news_count", 0) for s in with_news)
+    pos_stocks = sum(1 for s in with_news if s.get("sentiment", 0) > 0.1)
+    neg_stocks = sum(1 for s in with_news if s.get("sentiment", 0) < -0.1)
+    neu_stocks = len(with_news) - pos_stocks - neg_stocks
+
+    st.markdown(f"""
+    <div style="display:flex;gap:16px;margin-bottom:20px;flex-wrap:wrap">
+      <div style="background:#09090f;border:1px solid #1c1c2e;border-radius:8px;
+                  padding:12px 20px;min-width:120px;text-align:center">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;
+                    letter-spacing:2px;color:#5a5a78;text-transform:uppercase;
+                    margin-bottom:4px">Stocks covered</div>
+        <div style="font-size:22px;font-weight:700;color:#e0e0ff">{len(with_news)}</div>
+      </div>
+      <div style="background:#09090f;border:1px solid #1c1c2e;border-radius:8px;
+                  padding:12px 20px;min-width:120px;text-align:center">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;
+                    letter-spacing:2px;color:#5a5a78;text-transform:uppercase;
+                    margin-bottom:4px">Total articles</div>
+        <div style="font-size:22px;font-weight:700;color:#e0e0ff">{total_articles}</div>
+      </div>
+      <div style="background:#09090f;border:1px solid #1c1c2e;border-radius:8px;
+                  padding:12px 20px;min-width:120px;text-align:center">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;
+                    letter-spacing:2px;color:#5a5a78;text-transform:uppercase;
+                    margin-bottom:4px">Positive tone</div>
+        <div style="font-size:22px;font-weight:700;color:#00e5a0">{pos_stocks}</div>
+      </div>
+      <div style="background:#09090f;border:1px solid #1c1c2e;border-radius:8px;
+                  padding:12px 20px;min-width:120px;text-align:center">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;
+                    letter-spacing:2px;color:#5a5a78;text-transform:uppercase;
+                    margin-bottom:4px">Negative tone</div>
+        <div style="font-size:22px;font-weight:700;color:#ff4560">{neg_stocks}</div>
+      </div>
+      <div style="background:#09090f;border:1px solid #1c1c2e;border-radius:8px;
+                  padding:12px 20px;min-width:120px;text-align:center">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;
+                    letter-spacing:2px;color:#5a5a78;text-transform:uppercase;
+                    margin-bottom:4px">Neutral</div>
+        <div style="font-size:22px;font-weight:700;color:#5a5a78">{neu_stocks}</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── Optional sector filter ─────────────────────────────────────────
+    sectors = sorted({s.get("sector", "Other") for s in with_news})
+    filter_col, search_col = st.columns([2, 3])
+    with filter_col:
+        selected_sector = st.selectbox(
+            "Filter by sector",
+            ["All sectors"] + sectors,
+            key="news_sector_filter",
+        )
+    with search_col:
+        search_sym = st.text_input(
+            "Search symbol",
+            placeholder="e.g. RELIANCE",
+            key="news_sym_search",
+        ).strip().upper()
+
+    if selected_sector != "All sectors":
+        with_news = [s for s in with_news if s.get("sector") == selected_sector]
+    if search_sym:
+        with_news = [s for s in with_news if search_sym in s.get("symbol", "")]
+
+    if not with_news:
+        st.info("No stocks match your filter.")
+        return
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Per-stock news cards ───────────────────────────────────────────
+    for s in with_news:
+        sym       = s.get("symbol", "")
+        sector    = s.get("sector", "")
+        sent      = s.get("sentiment", 0.0)
+        conf      = s.get("sent_confidence", 0.0)
+        n_art     = s.get("news_count", 0)
+        latest_ts = s.get("news_latest", "")
+        headlines = s.get("news_headlines", [])
+        signal    = s.get("signal", "🟠 HOLD")
+        sig_color = s.get("sig_color", "#f59e0b")
+        ml_score  = s.get("final_score", 50.0)
+
+        # Sentiment colour and label
+        if   sent >  0.3: sent_col, sent_label = "#00e5a0", "Positive"
+        elif sent < -0.3: sent_col, sent_label = "#ff4560", "Negative"
+        else:             sent_col, sent_label = "#f59e0b", "Neutral"
+
+        # Confidence bar (filled squares)
+        conf_pct = int(conf * 10)
+        conf_bar = "█" * conf_pct + "░" * (10 - conf_pct)
+
+        # Build headline list HTML
+        hl_items = "".join(
+            f'<li style="margin-bottom:6px;color:#c0c0d8;font-size:13px;'
+            f'font-family:\'Inter\',sans-serif;line-height:1.5">'
+            f'{h}</li>'
+            for h in headlines
+        )
+
+        st.markdown(f"""
+        <div style="background:#09090f;border:1px solid #1c1c2e;
+                    border-left:3px solid {sig_color};
+                    border-radius:10px;padding:16px 20px;margin-bottom:12px">
+
+          <!-- Header row -->
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;
+                      flex-wrap:wrap">
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:15px;
+                         font-weight:700;color:#e0e0ff">{sym}</span>
+            <span style="font-size:11px;color:#5a5a78;background:#13131f;
+                         border:1px solid #1c1c2e;border-radius:4px;
+                         padding:2px 8px">{sector}</span>
+            <span style="font-size:11px;color:{sig_color};background:#09090f;
+                         border:1px solid {sig_color}44;border-radius:4px;
+                         padding:2px 8px">{signal}</span>
+            <span style="font-size:11px;color:#5a5a78;margin-left:auto">
+              Score&nbsp;<b style="color:#e0e0ff">{ml_score:.0f}</b>/100
+            </span>
+          </div>
+
+          <!-- Sentiment + stats row -->
+          <div style="display:flex;gap:24px;margin-bottom:12px;flex-wrap:wrap">
+            <div>
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;
+                          letter-spacing:2px;color:#5a5a78;text-transform:uppercase;
+                          margin-bottom:2px">Sentiment</div>
+              <div style="font-size:14px;font-weight:600;color:{sent_col}">
+                {sent:+.3f} &nbsp;<span style="font-size:11px">{sent_label}</span>
+              </div>
+            </div>
+            <div>
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;
+                          letter-spacing:2px;color:#5a5a78;text-transform:uppercase;
+                          margin-bottom:2px">Articles (48h)</div>
+              <div style="font-size:14px;font-weight:600;color:#e0e0ff">{n_art}</div>
+            </div>
+            <div>
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;
+                          letter-spacing:2px;color:#5a5a78;text-transform:uppercase;
+                          margin-bottom:2px">Confidence</div>
+              <div style="font-size:11px;font-family:'IBM Plex Mono',monospace;
+                          color:{sent_col};letter-spacing:1px">{conf_bar}</div>
+            </div>
+            {f'<div><div style="font-family:\'IBM Plex Mono\',monospace;font-size:8px;letter-spacing:2px;color:#5a5a78;text-transform:uppercase;margin-bottom:2px">Latest</div><div style="font-size:11px;color:#5a5a78">{latest_ts}</div></div>' if latest_ts else ''}
+          </div>
+
+          <!-- Headlines -->
+          <ul style="margin:0;padding-left:18px">
+            {hl_items}
+          </ul>
+
+        </div>
+        """, unsafe_allow_html=True)
