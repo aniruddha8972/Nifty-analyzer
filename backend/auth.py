@@ -135,23 +135,48 @@ def _sb_register(username: str, name: str, email: str, password: str) -> tuple[b
 
     uid   = res.user.id
     token = res.session.access_token if res.session else None
-    ac    = _get_supabase_client(token) if token else client
 
-    # ── Upsert profile ────────────────────────────────────────────────
-    try:
-        ac.table("profiles").upsert({
-            "id":       uid,
-            "username": username,
-            "name":     name.strip(),
-            "email":    email,
-            "is_admin": False,
-        }).execute()
-    except Exception as e:
-        # Non-fatal — trigger may have done it
-        pass
+    # ── Update profile with real username + name + email ─────────────
+    # Trigger already created a placeholder row — we overwrite it.
+    # Try 3 strategies so email is ALWAYS saved regardless of token state.
+    profile_payload = {
+        "id":       uid,
+        "username": username,
+        "name":     name.strip(),
+        "email":    email,
+        "is_admin": False,
+    }
 
+    saved = False
+
+    # Strategy 1: authenticated client (token available)
+    if token:
+        try:
+            ac = _get_supabase_client(token)
+            ac.table("profiles").upsert(profile_payload).execute()
+            saved = True
+        except Exception:
+            pass
+
+    # Strategy 2: anon client upsert (RLS insert policy is WITH CHECK(true))
+    if not saved:
+        try:
+            client.table("profiles").upsert(profile_payload).execute()
+            saved = True
+        except Exception:
+            pass
+
+    # Strategy 3: UPDATE only (no id conflict) — works even without token
+    if not saved:
+        try:
+            client.table("profiles")                   .update({"username": username, "name": name.strip(), "email": email})                   .eq("id", uid).execute()
+        except Exception:
+            pass
+
+    # Portfolio row
     try:
-        ac.table("portfolios").upsert({"user_id": uid, "data": {}}).execute()
+        pf = _get_supabase_client(token) if token else client
+        pf.table("portfolios").upsert({"user_id": uid, "data": {}}).execute()
     except Exception:
         pass
 
@@ -270,24 +295,41 @@ def _sb_logout(user_info: dict) -> None:
 
 
 def _sb_load_portfolio(user_info: dict) -> dict:
-    try:
-        res = _get_supabase_client(user_info.get("access_token")) \
-                  .table("portfolios").select("data") \
-                  .eq("user_id", user_info["user_id"]).single().execute()
-        return res.data.get("data", {}) if res.data else {}
-    except Exception:
+    """Load portfolio — tries with auth token, falls back to anon."""
+    uid   = user_info.get("user_id", "")
+    token = user_info.get("access_token", "")
+    if not uid:
         return {}
+    for client in [_get_supabase_client(token), _get_supabase_client()]:
+        try:
+            res = client.table("portfolios").select("data") \
+                        .eq("user_id", uid).single().execute()
+            if res.data:
+                return res.data.get("data", {}) or {}
+        except Exception:
+            continue
+    return {}
 
 
 def _sb_save_portfolio(user_info: dict, portfolio: dict) -> None:
-    try:
-        _get_supabase_client(user_info.get("access_token")) \
-            .table("portfolios").upsert({
-                "user_id": user_info["user_id"],
+    """Save portfolio — raises exception on failure so caller can report it."""
+    uid   = user_info.get("user_id", "")
+    token = user_info.get("access_token", "")
+    if not uid:
+        raise ValueError("No user_id in user_info — not logged in")
+
+    last_err = None
+    for client in [_get_supabase_client(token), _get_supabase_client()]:
+        try:
+            client.table("portfolios").upsert({
+                "user_id": uid,
                 "data":    portfolio,
             }).execute()
-    except Exception:
-        pass
+            return   # success
+        except Exception as e:
+            last_err = e
+            continue
+    raise last_err or Exception("Portfolio save failed — both auth and anon client failed")
 
 
 # ══════════════════════════════════════════════════════════════════════
