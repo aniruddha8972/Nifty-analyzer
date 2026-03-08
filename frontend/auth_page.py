@@ -266,14 +266,35 @@ def render_auth_page() -> bool:
                     ok, msg = register(reg_user, reg_name, reg_email, reg_pw)
                 if ok:
                     st.success(msg)
-                    if sb_mode:
-                        st.info("✉ Check your email to confirm your address, then sign in.")
-                    else:
-                        st.info("Account created — you can now sign in.")
                     st.session_state["auth_tab"] = "login"
                     st.rerun()
                 else:
-                    st.error(msg)
+                    # ── Smart error messages ──────────────────────────
+                    if msg == "EMAIL_EXISTS":
+                        st.error("That email is already registered.")
+                        st.info("👉 Click **Sign In** above to log in instead.")
+                    elif msg.startswith("USERNAME_TAKEN:"):
+                        suggestions = msg.split(":", 1)[1].split(",")
+                        suggestions = [s for s in suggestions if s and s != "—"]
+                        st.error(f"Username **{reg_user}** is already taken.")
+                        if suggestions:
+                            st.markdown(
+                                f'<div style="background:#0a1520;border:1px solid #1a3a28;'
+                                f'border-radius:8px;padding:12px 16px;margin-top:8px;'
+                                f'font-family:DM Sans,sans-serif;font-size:13px;color:#e8e8f0">'
+                                f'💡 Available usernames you can try:<br><br>'
+                                + "".join(
+                                    f'<span style="display:inline-block;background:#0c0c12;'
+                                    f'border:1px solid #00e5a044;border-radius:4px;'
+                                    f'padding:3px 10px;margin:3px;font-family:Space Mono,monospace;'
+                                    f'font-size:12px;color:#00e5a0">@{s}</span>'
+                                    for s in suggestions
+                                )
+                                + "</div>",
+                                unsafe_allow_html=True,
+                            )
+                    else:
+                        st.error(msg)
 
     # ── Footer ────────────────────────────────────────────────────────
     st.markdown("""
