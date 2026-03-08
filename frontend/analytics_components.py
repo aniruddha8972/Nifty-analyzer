@@ -21,25 +21,25 @@ import streamlit as st
 # ══════════════════════════════════════════════════════════════════════
 
 def _section(title: str, subtitle: str = "") -> None:
-    sub_html = f'<span style="font-size:11px;color:#4a4a60;margin-left:12px">{subtitle}</span>' if subtitle else ""
+    sub_html = f'<span style="font-size:11px;color:#5a5a78;margin-left:12px">{subtitle}</span>' if subtitle else ""
     st.markdown(f"""
     <div style="margin:4px 0 18px">
-      <span style="font-family:'Space Mono',monospace;font-size:13px;
-                   font-weight:700;color:#e8e8f0">{title}</span>
+      <span style="font-family:'IBM Plex Mono',monospace;font-size:13px;
+                   font-weight:700;color:#eeeef8">{title}</span>
       {sub_html}
     </div>
     """, unsafe_allow_html=True)
 
 
-def _metric(label: str, value: str, color: str = "#e8e8f0", sub: str = "") -> str:
-    sub_html = f'<div style="font-size:10px;color:#4a4a60;margin-top:2px">{sub}</div>' if sub else ""
+def _metric(label: str, value: str, color: str = "#eeeef8", sub: str = "") -> str:
+    sub_html = f'<div style="font-size:10px;color:#5a5a78;margin-top:2px">{sub}</div>' if sub else ""
     return f"""
-    <div style="background:#08080e;border:1px solid #1a1a28;border-radius:8px;
+    <div style="background:#09090f;border:1px solid #1c1c2e;border-radius:8px;
                 padding:14px 16px;text-align:center">
       <div style="font-family:'DM Sans',sans-serif;font-size:10px;
-                  letter-spacing:1px;text-transform:uppercase;color:#4a4a60;
+                  letter-spacing:1px;text-transform:uppercase;color:#5a5a78;
                   margin-bottom:6px">{label}</div>
-      <div style="font-family:'Space Mono',monospace;font-size:18px;
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:18px;
                   font-weight:700;color:{color}">{value}</div>
       {sub_html}
     </div>"""
@@ -114,11 +114,11 @@ def render_heatmap_tab(stock_data: list[dict]) -> None:
                 title="Return %",
                 tickfont=dict(color="#6b6b80", size=10),
                 title_font=dict(color="#6b6b80"),
-                bgcolor="#0c0c12",
-                bordercolor="#1e1e2e",
+                bgcolor="#09090f",
+                bordercolor="#1c1c2e",
                 len=0.8,
             ),
-            font=dict(family="DM Sans", color="#e8e8f0"),
+            font=dict(family="DM Sans", color="#eeeef8"),
         )
 
         st.plotly_chart(fig, key="heatmap_treemap")
@@ -163,15 +163,15 @@ def _render_sector_cards(summary: list[dict]) -> None:
         sign  = "+" if chg >= 0 else ""
         with cols[i]:
             st.markdown(f"""
-            <div style="background:#08080e;border:1px solid #1a1a28;
+            <div style="background:#09090f;border:1px solid #1c1c2e;
                         border-left:3px solid {color};border-radius:8px;
                         padding:12px;text-align:center">
-              <div style="font-family:'Space Mono',monospace;font-size:9px;
-                          letter-spacing:1px;color:#4a4a60;text-transform:uppercase;
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;
+                          letter-spacing:1px;color:#5a5a78;text-transform:uppercase;
                           margin-bottom:6px">{sec['sector']}</div>
-              <div style="font-family:'Space Mono',monospace;font-size:16px;
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:16px;
                           font-weight:700;color:{color}">{sign}{chg:.2f}%</div>
-              <div style="font-size:10px;color:#3a3a4e;margin-top:4px">
+              <div style="font-size:10px;color:#33334a;margin-top:4px">
                 {sec['sector_gainers']}↑ {sec['sector_losers']}↓
               </div>
             </div>
@@ -214,8 +214,8 @@ def render_backtest_tab() -> None:
 
     if not run_btn and "bt_result" not in st.session_state:
         st.markdown("""
-        <div style="text-align:center;padding:60px 0;color:#3a3a4e;
-                    font-family:'Space Mono',monospace;font-size:12px">
+        <div style="text-align:center;padding:60px 0;color:#33334a;
+                    font-family:'IBM Plex Mono',monospace;font-size:12px">
           Configure strategy above and click ▶ Run Backtest
         </div>
         """, unsafe_allow_html=True)
@@ -292,12 +292,12 @@ def _render_backtest_results(result: dict) -> None:
                 line=dict(color="#00e5a0", width=2),
                 name="Cumulative Return %",
             ))
-            fig.add_hline(y=0, line_dash="dot", line_color="#3a3a4e", line_width=1)
+            fig.add_hline(y=0, line_dash="dot", line_color="#33334a", line_width=1)
             fig.update_layout(
                 paper_bgcolor="#050508", plot_bgcolor="#050508",
                 height=260, margin=dict(t=10, l=0, r=0, b=0),
-                xaxis=dict(gridcolor="#1a1a28", color="#6b6b80"),
-                yaxis=dict(gridcolor="#1a1a28", color="#6b6b80",
+                xaxis=dict(gridcolor="#1c1c2e", color="#6b6b80"),
+                yaxis=dict(gridcolor="#1c1c2e", color="#6b6b80",
                            title="Cumulative Return %"),
                 font=dict(family="DM Sans", color="#6b6b80"),
                 showlegend=False,
@@ -330,8 +330,8 @@ def _render_backtest_results(result: dict) -> None:
             .map(_color_wr,  subset=["Win Rate %"])
             .map(_color_ret, subset=["Avg Return %"])
             .format({"Win Rate %": "{:.1f}%", "Avg Return %": "{:+.2f}%"})
-            .set_properties(**{"background-color":"#0c0c12","color":"#e8e8f0",
-                               "border":"1px solid #1e1e2e"})
+            .set_properties(**{"background-color":"#09090f","color":"#eeeef8",
+                               "border":"1px solid #1c1c2e"})
         )
         _section("Per-Stock Backtest Results")
         st.dataframe(styled, width="stretch", hide_index=True, height=300)
@@ -356,8 +356,8 @@ def render_correlation_tab(portfolio_symbols: list[str] | None = None) -> None:
 
     if not run_btn and "corr_result" not in st.session_state:
         st.markdown("""
-        <div style="text-align:center;padding:60px 0;color:#3a3a4e;
-                    font-family:'Space Mono',monospace;font-size:12px">
+        <div style="text-align:center;padding:60px 0;color:#33334a;
+                    font-family:'IBM Plex Mono',monospace;font-size:12px">
           Click Compute Correlations to analyse all 50 stocks (cached for session)
         </div>
         """, unsafe_allow_html=True)
@@ -398,19 +398,19 @@ def render_correlation_tab(portfolio_symbols: list[str] | None = None) -> None:
         if score is not None:
             s_color = "#00e5a0" if score >= 70 else "#f59e0b" if score >= 45 else "#ff4560"
             st.markdown(f"""
-            <div style="background:#08080e;border:1px solid #1a1a28;border-radius:10px;
+            <div style="background:#09090f;border:1px solid #1c1c2e;border-radius:10px;
                         padding:16px 20px;margin-bottom:20px;display:flex;align-items:center;gap:20px">
-              <div style="font-family:'Space Mono',monospace;font-size:32px;
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:32px;
                           font-weight:700;color:{s_color}">{score}</div>
               <div>
-                <div style="font-family:'Space Mono',monospace;font-size:11px;
-                            letter-spacing:2px;color:#4a4a60;text-transform:uppercase">
+                <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;
+                            letter-spacing:2px;color:#5a5a78;text-transform:uppercase">
                   Your Portfolio Diversification Score
                 </div>
                 <div style="font-family:'DM Sans',sans-serif;font-size:13px;
-                            color:#e8e8f0;margin-top:4px">{div['message']}</div>
+                            color:#eeeef8;margin-top:4px">{div['message']}</div>
                 <div style="font-family:'DM Sans',sans-serif;font-size:11px;
-                            color:#4a4a60;margin-top:2px">
+                            color:#5a5a78;margin-top:2px">
                   Avg pairwise correlation: {div['avg_correlation']:.3f}
                 </div>
               </div>
@@ -465,7 +465,7 @@ def render_correlation_tab(portfolio_symbols: list[str] | None = None) -> None:
             return f"color:#ff4560;font-weight:700"
         elif val >= 0.4:
             return f"color:#f59e0b;font-weight:600"
-        return "color:#e8e8f0"
+        return "color:#eeeef8"
 
     def _colour_corr_low(val):
         """Green for low/negative correlation (good — natural hedge)."""
@@ -475,7 +475,7 @@ def render_correlation_tab(portfolio_symbols: list[str] | None = None) -> None:
             return "color:#00e5a0;font-weight:700"
         elif val <= 0.2:
             return "color:#34d399;font-weight:600"
-        return "color:#e8e8f0"
+        return "color:#eeeef8"
 
     c1, c2 = st.columns(2)
     with c1:
@@ -487,9 +487,9 @@ def render_correlation_tab(portfolio_symbols: list[str] | None = None) -> None:
             styled  = (pair_df.style
                        .format({"Correlation": "{:.3f}"})
                        .map(_colour_corr_high, subset=["Correlation"])
-                       .set_properties(**{"background-color": "#0c0c12",
-                                          "color": "#e8e8f0",
-                                          "border": "1px solid #1e1e2e"}))
+                       .set_properties(**{"background-color": "#09090f",
+                                          "color": "#eeeef8",
+                                          "border": "1px solid #1c1c2e"}))
             st.dataframe(styled, width="stretch", hide_index=True)
 
     with c2:
@@ -501,9 +501,9 @@ def render_correlation_tab(portfolio_symbols: list[str] | None = None) -> None:
             styled  = (pair_df.style
                        .format({"Correlation": "{:.3f}"})
                        .map(_colour_corr_low, subset=["Correlation"])
-                       .set_properties(**{"background-color": "#0c0c12",
-                                          "color": "#e8e8f0",
-                                          "border": "1px solid #1e1e2e"}))
+                       .set_properties(**{"background-color": "#09090f",
+                                          "color": "#eeeef8",
+                                          "border": "1px solid #1c1c2e"}))
             st.dataframe(styled, width="stretch", hide_index=True)
 
 
@@ -515,7 +515,7 @@ _EVENT_COLORS = {
     "fo_expiry":      "#f59e0b",
     "results":        "#00e5a0",
     "results_season": "#8b5cf6",
-    "market_closed":  "#4a4a60",
+    "market_closed":  "#5a5a78",
     "budget":         "#ef4444",
     "dividend":       "#3b82f6",
 }
@@ -532,8 +532,8 @@ def render_events_tab() -> None:
     upcoming = get_upcoming_events(events_dict, days_ahead=45)
 
     st.markdown("""
-    <div style="font-family:'Space Mono',monospace;font-size:9px;letter-spacing:3px;
-                text-transform:uppercase;color:#4a4a60;margin-bottom:12px">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:3px;
+                text-transform:uppercase;color:#5a5a78;margin-bottom:12px">
       NEXT 45 DAYS
     </div>
     """, unsafe_allow_html=True)
@@ -562,16 +562,16 @@ def render_events_tab() -> None:
                     f'{evt["title"]}{desc_html}</span>'
                 )
 
-            badge_color = "#ff4560" if days_away <= 3 else "#f59e0b" if days_away <= 7 else "#4a4a60"
+            badge_color = "#ff4560" if days_away <= 3 else "#f59e0b" if days_away <= 7 else "#5a5a78"
             st.markdown(f"""
             <div style="display:flex;align-items:flex-start;gap:16px;
                         padding:12px 0;border-bottom:1px solid #0e0e18">
               <div style="min-width:120px;text-align:right">
-                <div style="font-family:'Space Mono',monospace;font-size:13px;
-                            font-weight:700;color:#e8e8f0">
+                <div style="font-family:'IBM Plex Mono',monospace;font-size:13px;
+                            font-weight:700;color:#eeeef8">
                   {d_obj.strftime('%d %b %Y')}
                 </div>
-                <div style="font-family:'Space Mono',monospace;font-size:9px;
+                <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;
                             letter-spacing:1px;color:{badge_color};margin-top:2px">
                   {d_obj.strftime('%A').upper()} · {day_label}
                 </div>
@@ -593,7 +593,7 @@ def render_events_tab() -> None:
 
         month_name = date(target_year, target_month, 1).strftime("%B %Y")
         st.markdown(f"""
-        <div style="font-family:'Space Mono',monospace;font-size:11px;letter-spacing:2px;
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:2px;
                     text-transform:uppercase;color:#00e5a0;margin:20px 0 8px">
           {month_name}
         </div>
@@ -610,8 +610,8 @@ def _render_month_grid(year: int, month: int,
 
     # Day-name header row — single line per cell
     header = "".join(
-        f'<div style="text-align:center;font-family:Space Mono,monospace;'
-        f'font-size:9px;letter-spacing:1px;color:#3a3a4e;padding:4px">{d}</div>'
+        f'<div style="text-align:center;font-family:IBM Plex Mono,monospace;'
+        f'font-size:9px;letter-spacing:1px;color:#33334a;padding:4px">{d}</div>'
         for d in days
     )
 
@@ -628,8 +628,8 @@ def _render_month_grid(year: int, month: int,
             is_today   = d == today
             is_weekend = d.weekday() >= 5
 
-            bg     = "#0a1520" if is_today else "#08080e"
-            nc     = "#00e5a0" if is_today else ("#6b6b80" if is_weekend else "#e8e8f0")
+            bg     = "#0a1520" if is_today else "#09090f"
+            nc     = "#00e5a0" if is_today else ("#6b6b80" if is_weekend else "#eeeef8")
             border = "1px solid #00e5a0" if is_today else "1px solid #0e0e18"
 
             # Coloured dots for events — one line each
@@ -652,7 +652,7 @@ def _render_month_grid(year: int, month: int,
             cells += (
                 f'<div {tip_attr} style="background:{bg};border:{border};'
                 f'border-radius:4px;padding:5px 6px;min-height:52px;cursor:default">'
-                f'<div style="font-family:Space Mono,monospace;font-size:10px;'
+                f'<div style="font-family:IBM Plex Mono,monospace;font-size:10px;'
                 f'font-weight:700;color:{nc}">{day_num}</div>'
                 f'{dots_html}</div>'
             )
@@ -663,7 +663,7 @@ def _render_month_grid(year: int, month: int,
         ("#00e5a0", "Results"),
         ("#8b5cf6", "Results Season"),
         ("#ef4444", "Budget"),
-        ("#4a4a60", "Market Closed"),
+        ("#5a5a78", "Market Closed"),
     ]
     legend = "".join(
         f'<span style="font-size:10px;color:#6b6b80;margin-right:14px">'

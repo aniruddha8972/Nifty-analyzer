@@ -26,10 +26,10 @@ def _token() -> str:
 
 
 def _section(title: str, sub: str = "") -> None:
-    sub_html = f'<span style="font-size:11px;color:#4a4a60;margin-left:10px">{sub}</span>' if sub else ""
+    sub_html = f'<span style="font-size:11px;color:#5a5a78;margin-left:10px">{sub}</span>' if sub else ""
     st.markdown(
-        f'<div style="font-family:Space Mono,monospace;font-size:13px;'
-        f'font-weight:700;color:#e8e8f0;margin:20px 0 14px">{title}{sub_html}</div>',
+        f'<div style="font-family:IBM Plex Mono,monospace;font-size:13px;'
+        f'font-weight:700;color:#eeeef8;margin:20px 0 14px">{title}{sub_html}</div>',
         unsafe_allow_html=True,
     )
 
@@ -39,7 +39,7 @@ def _badge(text: str, color: str) -> str:
         f'<span style="display:inline-block;background:{color}18;'
         f'border:1px solid {color}44;border-radius:3px;padding:1px 7px;'
         f'font-size:9px;letter-spacing:1px;color:{color};'
-        f'font-family:Space Mono,monospace;text-transform:uppercase">{text}</span>'
+        f'font-family:IBM Plex Mono,monospace;text-transform:uppercase">{text}</span>'
     )
 
 
@@ -60,16 +60,16 @@ def render_admin_dashboard() -> None:
     <div style="background:linear-gradient(135deg,#0a1a10,#080814);
                 border:1px solid #1a3a28;border-radius:12px;
                 padding:20px 24px;margin-bottom:20px">
-      <div style="font-family:Space Mono,monospace;font-size:9px;
+      <div style="font-family:IBM Plex Mono,monospace;font-size:9px;
                   letter-spacing:4px;color:#00e5a0;text-transform:uppercase">
         ADMIN DASHBOARD
       </div>
-      <div style="font-family:Space Mono,monospace;font-size:20px;
-                  font-weight:700;color:#e8e8f0;margin-top:4px">
+      <div style="font-family:IBM Plex Mono,monospace;font-size:20px;
+                  font-weight:700;color:#eeeef8;margin-top:4px">
         User Management
       </div>
-      <div style="font-family:DM Sans,sans-serif;font-size:12px;
-                  color:#4a4a60;margin-top:4px">
+      <div style="font-family:Inter,sans-serif;font-size:12px;
+                  color:#5a5a78;margin-top:4px">
         Full access to all user accounts and portfolios
       </div>
     </div>
@@ -87,18 +87,18 @@ def render_admin_dashboard() -> None:
     c1, c2, c3, c4 = st.columns(4)
     for col, label, val, color in [
         (c1, "Total Users",    total,    "#00e5a0"),
-        (c2, "Regular Users",  regulars, "#e8e8f0"),
+        (c2, "Regular Users",  regulars, "#eeeef8"),
         (c3, "Admins",         admins,   "#f59e0b"),
         (c4, "Mode",           "Supabase ☁", "#8b5cf6"),
     ]:
         with col:
             st.markdown(
-                f'<div style="background:#08080e;border:1px solid #1a1a28;'
+                f'<div style="background:#09090f;border:1px solid #1c1c2e;'
                 f'border-radius:8px;padding:14px 16px;text-align:center">'
-                f'<div style="font-family:Space Mono,monospace;font-size:9px;'
-                f'letter-spacing:1px;color:#4a4a60;text-transform:uppercase;'
+                f'<div style="font-family:IBM Plex Mono,monospace;font-size:9px;'
+                f'letter-spacing:1px;color:#5a5a78;text-transform:uppercase;'
                 f'margin-bottom:6px">{label}</div>'
-                f'<div style="font-family:Space Mono,monospace;font-size:20px;'
+                f'<div style="font-family:IBM Plex Mono,monospace;font-size:20px;'
                 f'font-weight:700;color:{color}">{val}</div></div>',
                 unsafe_allow_html=True,
             )
@@ -128,21 +128,21 @@ def render_admin_dashboard() -> None:
                 joined   = u.get("created_at", "")[:10] if u.get("created_at") else "—"
                 me       = uid == st.session_state.get("user_info", {}).get("user_id", "")
 
-                badge_html = _badge("ADMIN", "#f59e0b") if is_adm else _badge("USER", "#6b6b80")
+                badge_html = _badge("ADMIN", "#f59e0b") if is_adm else _badge("USER", "#5a5a78")
                 me_html    = _badge("YOU", "#00e5a0") if me else ""
 
                 with st.container():
                     st.markdown(
-                        f'<div style="background:#0c0c12;border:1px solid #1e1e2e;'
-                        f'border-left:3px solid {"#f59e0b" if is_adm else "#1e1e2e"};'
+                        f'<div style="background:#09090f;border:1px solid #1c1c2e;'
+                        f'border-left:3px solid {"#f59e0b" if is_adm else "#1c1c2e"};'
                         f'border-radius:8px;padding:12px 16px;margin-bottom:8px">'
                         f'<div style="display:flex;justify-content:space-between;align-items:center">'
                         f'<div>'
-                        f'<span style="font-family:Space Mono,monospace;font-size:13px;'
-                        f'font-weight:700;color:#e8e8f0">{name}</span>'
+                        f'<span style="font-family:IBM Plex Mono,monospace;font-size:13px;'
+                        f'font-weight:700;color:#eeeef8">{name}</span>'
                         f'&nbsp;&nbsp;{badge_html}&nbsp;{me_html}'
-                        f'<div style="font-family:DM Sans,sans-serif;font-size:11px;'
-                        f'color:#4a4a60;margin-top:3px">'
+                        f'<div style="font-family:Inter,sans-serif;font-size:11px;'
+                        f'color:#5a5a78;margin-top:3px">'
                         f'@{uname} · {email} · Joined {joined}</div>'
                         f'</div>'
                         f'</div></div>',
@@ -235,7 +235,7 @@ def render_admin_dashboard() -> None:
             new_admin = st.checkbox("Grant admin access", key="adm_new_is_admin")
         with c2:
             new_uname = st.text_input("Username",     placeholder="rahul_trades",    key="adm_new_uname")
-            new_pw    = st.text_input("Password",     placeholder="min 6 chars",
+            new_pw    = st.text_input("Password",     placeholder="Min 8 + A-Z + 0-9 + symbol",
                                       type="password", key="adm_new_pw")
 
         # Suggest username based on name
@@ -248,11 +248,14 @@ def render_admin_dashboard() -> None:
         if st.button("➕  Create User", type="primary", key="adm_create_btn"):
             if not all([new_name, new_uname, new_email, new_pw]):
                 st.error("Please fill in all fields.")
-            elif len(new_pw) < 6:
-                st.error("Password must be at least 6 characters.")
             elif len(new_uname) < 3:
                 st.error("Username must be at least 3 characters.")
             else:
+                from backend.auth import validate_password
+                pw_ok, pw_fails = validate_password(new_pw)
+                if not pw_ok:
+                    st.error("Weak password: " + " · ".join(pw_fails))
+                    st.stop()
                 with st.spinner("Creating user…"):
                     ok, msg = admin_create_user(
                         token, new_uname, new_name,
@@ -314,17 +317,17 @@ def render_admin_dashboard() -> None:
         if rows:
             port_df = pd.DataFrame(rows)
             def _role_color(val):
-                return "color:#f59e0b;font-weight:700" if val == "Admin" else "color:#e8e8f0"
+                return "color:#f59e0b;font-weight:700" if val == "Admin" else "color:#eeeef8"
             def _val_color(val):
-                return "color:#00e5a0" if val != "—" else "color:#4a4a60"
+                return "color:#00e5a0" if val != "—" else "color:#5a5a78"
             styled = (
                 port_df.style
                 .map(_role_color, subset=["Role"])
                 .map(_val_color,  subset=["Approx Value"])
                 .set_properties(**{
-                    "background-color": "#0c0c12",
-                    "color": "#e8e8f0",
-                    "border": "1px solid #1e1e2e",
+                    "background-color": "#09090f",
+                    "color": "#eeeef8",
+                    "border": "1px solid #1c1c2e",
                 })
             )
             st.dataframe(styled, width="stretch", hide_index=True)
