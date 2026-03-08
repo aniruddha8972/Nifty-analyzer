@@ -126,14 +126,14 @@ def add_holding(symbol: str, qty: int, price: float,
             "lots":          [{"date": buy_date, "qty": qty, "price": price}],
         }
     st.session_state["portfolio"] = portfolio
-    _persist()
+    _persist()  # noqa: fire-and-forget in CRUD
 
 
 def remove_holding(symbol: str) -> None:
     portfolio = _get_portfolio()
     portfolio.pop(symbol, None)
     st.session_state["portfolio"] = portfolio
-    _persist()
+    _persist()  # noqa: fire-and-forget in CRUD
 
 
 def update_qty(symbol: str, new_qty: int) -> None:
