@@ -206,6 +206,36 @@ def _get_client():
     return create_client(url, key)
 
 
+def _get_service_client():
+    """Service role client — full admin access, bypasses ALL RLS and auth restrictions."""
+    from supabase import create_client
+    url     = st.secrets["supabase"]["url"]
+    svc_key = st.secrets.get("supabase", {}).get("service_role_key", "")
+    if not svc_key:
+        raise ValueError("service_role_key not set in .streamlit/secrets.toml")
+    return create_client(url, svc_key)
+
+
+def _delete_auth_user(user_id: str) -> None:
+    """Delete a user from auth.users using service role key (Admin API)."""
+    import urllib.request, json
+    url     = st.secrets["supabase"]["url"]
+    svc_key = st.secrets.get("supabase", {}).get("service_role_key", "")
+    if not svc_key:
+        raise ValueError("service_role_key not set in secrets.toml")
+    req = urllib.request.Request(
+        f"{url}/auth/v1/admin/users/{user_id}",
+        method="DELETE",
+        headers={
+            "apikey":        svc_key,
+            "Authorization": f"Bearer {svc_key}",
+        }
+    )
+    with urllib.request.urlopen(req) as resp:
+        if resp.status not in (200, 204):
+            raise Exception(f"Auth delete failed: HTTP {resp.status}")
+
+
 def _try_supabase() -> bool:
     try:
         return bool(
@@ -319,32 +349,44 @@ def admin_list_users(token: str) -> list[dict]:
 
 def admin_delete_user(token: str, user_id: str) -> tuple[bool, str]:
     """
-    Fully deletes a user: auth.users + profiles + portfolios.
-    Uses SECURITY DEFINER RPC so auth.users deletion works without service role key.
+    Fully deletes a user: portfolios + profiles + auth.users.
+    Uses service_role_key to call Supabase Admin API for auth deletion.
     """
     try:
         client = _get_client()
         client.postgrest.auth(token)
 
-        # Try the SECURITY DEFINER RPC first (deletes auth.users too)
+        # Block deleting admin accounts
         try:
-            res = client.rpc("admin_delete_user_full", {"p_user_id": user_id}).execute()
-            return True, "User fully deleted (auth + profile + portfolio)"
-        except Exception as rpc_err:
-            err_str = str(rpc_err).lower()
-            if "admin access required" in err_str:
-                return False, "Admin access required"
-            if "cannot delete an admin" in err_str:
+            res = client.table("profiles").select("is_admin").eq("id", user_id).single().execute()
+            if res.data and res.data.get("is_admin"):
                 return False, "Cannot delete the admin account"
-            # RPC not yet deployed — fall back to table-only delete
-            # (auth.users row stays but user can't log in without a profile)
+        except Exception:
+            pass
 
-        # Fallback: delete profile + portfolio only
-        # User will get "username not found" on next login attempt
-        client.table("portfolios").delete().eq("user_id", user_id).execute()
-        client.table("profiles").delete().eq("id", user_id).execute()
-        return True, ("User profile deleted. Run RUN_THIS_IN_SUPABASE.sql "
-                      "to also remove their auth record.")
+        # Step 1: delete portfolio
+        try:
+            client.table("portfolios").delete().eq("user_id", user_id).execute()
+        except Exception:
+            pass
+
+        # Step 2: delete profile
+        try:
+            client.table("profiles").delete().eq("id", user_id).execute()
+        except Exception:
+            pass
+
+        # Step 3: delete from auth.users via Admin API (requires service_role_key)
+        try:
+            _delete_auth_user(user_id)
+            return True, "auth"   # signals full deletion to UI
+        except ValueError:
+            # service_role_key not configured
+            return True, ("profile_only — add service_role_key to secrets.toml "
+                          "to also delete login credentials")
+        except Exception as auth_err:
+            return True, f"profile_only — auth delete failed: {auth_err}"
+
     except Exception as e:
         return False, f"Delete error: {e}"
 

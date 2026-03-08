@@ -52,6 +52,26 @@ def _get_supabase_client(access_token: str | None = None):
 #  USERNAME SUGGESTION HELPER
 # ══════════════════════════════════════════════════════════════════════
 
+def validate_password(password: str) -> tuple[bool, list[str]]:
+    """
+    Returns (is_valid, unmet_rules).
+    Rules: 8+ chars, uppercase, lowercase, digit, special char.
+    """
+    SPECIAL = set("!@#$%^&*()_+-=[]{}|;:,./<>?")
+    rules = []
+    if len(password) < 8:
+        rules.append("At least 8 characters")
+    if not any(c.isupper() for c in password):
+        rules.append("At least one uppercase letter (A-Z)")
+    if not any(c.islower() for c in password):
+        rules.append("At least one lowercase letter (a-z)")
+    if not any(c.isdigit() for c in password):
+        rules.append("At least one number (0-9)")
+    if not any(c in SPECIAL for c in password):
+        rules.append("At least one special character (!@#$%...)")
+    return (len(rules) == 0), rules
+
+
 def _suggest_usernames(base: str, taken: set[str]) -> list[str]:
     """Return up to 3 available username suggestions based on base."""
     import random
@@ -95,8 +115,9 @@ def _sb_register(username: str, name: str, email: str, password: str) -> tuple[b
         return False, "Please enter your full name"
     if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
         return False, "Enter a valid email address"
-    if len(password.strip()) < 6:
-        return False, "Password must be at least 6 characters"
+    valid, fails = validate_password(password.strip())
+    if not valid:
+        return False, "Weak password: " + " · ".join(fails)
 
     client = _get_supabase_client()
 
@@ -294,6 +315,30 @@ def _sb_logout(user_info: dict) -> None:
         pass
 
 
+def _sb_update_password(user_info: dict, current_pw: str, new_pw: str) -> tuple[bool, str]:
+    """Update Supabase password. Verifies current password first."""
+    valid, fails = validate_password(new_pw.strip())
+    if not valid:
+        return False, "Weak password: " + " · ".join(fails)
+    token = user_info.get("access_token", "")
+    email = user_info.get("email", "")
+    if not token or not email:
+        return False, "Not logged in"
+    # Verify current password by re-login
+    try:
+        _get_supabase_client().auth.sign_in_with_password(
+            {"email": email, "password": current_pw}
+        )
+    except Exception:
+        return False, "Current password is incorrect"
+    # Update to new password
+    try:
+        _get_supabase_client(token).auth.update_user({"password": new_pw.strip()})
+        return True, "Password updated successfully"
+    except Exception as e:
+        return False, f"Update failed: {e}"
+
+
 def _sb_load_portfolio(user_info: dict) -> dict:
     """Load portfolio via SECURITY DEFINER RPC — bypasses all RLS."""
     uid = user_info.get("user_id", "")
@@ -364,8 +409,9 @@ def _local_register(username: str, name: str, email: str, password: str) -> tupl
         return False, "Please enter your full name"
     if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
         return False, "Enter a valid email address"
-    if len(password.strip()) < 6:
-        return False, "Password must be at least 6 characters"
+    valid, fails = validate_password(password.strip())
+    if not valid:
+        return False, "Weak password: " + " · ".join(fails)
 
     users = _load_users()
 
@@ -444,6 +490,23 @@ def _local_update_user(user_id: str, fields: dict) -> tuple[bool, str]:
     return True, "User updated"
 
 
+def _local_update_password(user_info: dict, current_pw: str, new_pw: str) -> tuple[bool, str]:
+    """Update password for local-mode user."""
+    valid, fails = validate_password(new_pw.strip())
+    if not valid:
+        return False, "Weak password: " + " · ".join(fails)
+    username = user_info.get("username", "")
+    users = _load_users()
+    user  = users.get(username)
+    if not user:
+        return False, "User not found"
+    if user.get("password_hash") != _hash(current_pw):
+        return False, "Current password is incorrect"
+    users[username]["password_hash"] = _hash(new_pw.strip())
+    _save_users(users)
+    return True, "Password updated successfully"
+
+
 def _local_load_portfolio(user_info: dict) -> dict:
     path = _local_pf_path(user_info.get("username", ""))
     if not path.exists():
@@ -492,6 +555,13 @@ def save_user_portfolio(user_info: dict, portfolio: dict) -> None:
         _sb_save_portfolio(user_info, portfolio)
     else:
         _local_save_portfolio(user_info, portfolio)
+
+
+def update_password(user_info: dict, current_pw: str, new_pw: str) -> tuple[bool, str]:
+    """Update user password with strength validation and current-password verification."""
+    if _use_supabase():
+        return _sb_update_password(user_info, current_pw, new_pw)
+    return _local_update_password(user_info, current_pw, new_pw)
 
 
 def is_supabase_mode() -> bool:
