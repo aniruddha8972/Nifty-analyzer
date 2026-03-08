@@ -520,6 +520,104 @@ test("ML v5 — app.py passes universe to predict()",        test_app_passes_uni
 test("ML v5 — ML banner shows 5yr history",                test_5yr_label_in_ml_banner)
 test("ML v5 — universe_key uses sorted() for stability",   test_universe_key_is_sorted)
 
+
+# ════════════════════════════════════════════════════════════════════════
+# SUITE 8 — SENTIMENT v2: Google News RSS + Financial NLP
+# ════════════════════════════════════════════════════════════════════════
+
+def test_sentiment_module_exists():
+    src_txt = (ROOT / "backend/sentiment.py").read_text()
+    expect(len(src_txt) > 500, "sentiment.py must exist and be non-trivial")
+
+def test_sentiment_has_google_news_url():
+    src_txt = (ROOT / "backend/sentiment.py").read_text()
+    expect("news.google.com" in src_txt, "Must use Google News RSS")
+    expect("rss/search" in src_txt, "Must use RSS search endpoint")
+
+def test_sentiment_batched_fetch():
+    src_txt = (ROOT / "backend/sentiment.py").read_text()
+    expect("_BATCH_SIZE" in src_txt, "Must batch requests")
+    expect("_fetch_batch_raw" in src_txt or "batch" in src_txt.lower())
+
+def test_sentiment_recency_weighting():
+    src_txt = (ROOT / "backend/sentiment.py").read_text()
+    expect("_RECENCY_WEIGHTS" in src_txt or "recency" in src_txt.lower(),
+           "Must have recency weighting")
+    expect("pub_dt" in src_txt or "pubDate" in src_txt or "pub_date" in src_txt,
+           "Must parse pubDate timestamps")
+
+def test_sentiment_negation_handling():
+    src_txt = (ROOT / "backend/sentiment.py").read_text()
+    expect("_NEGATIONS" in src_txt, "Must handle negation (not bullish → negative)")
+
+def test_sentiment_intensifiers():
+    src_txt = (ROOT / "backend/sentiment.py").read_text()
+    expect("_INTENSIFIERS" in src_txt, "Must handle intensifiers (sharply surges)")
+
+def test_sentiment_200_plus_words():
+    src_txt = (ROOT / "backend/sentiment.py").read_text()
+    pos_count = src_txt.count('"') // 2   # rough count
+    expect(pos_count > 100, f"Lexicon should have 200+ terms, rough count={pos_count}")
+
+def test_sentiment_score_function():
+    from backend.sentiment import _score_headline
+    # Positive headline
+    pos = _score_headline("Company beats earnings expectations with record profit")
+    expect(pos > 0, f"Positive headline should score > 0, got {pos}")
+    # Negative headline
+    neg = _score_headline("Stock crashes on fraud investigation, SEBI probe launched")
+    expect(neg < 0, f"Negative headline should score < 0, got {neg}")
+
+def test_sentiment_negation_works():
+    from backend.sentiment import _score_headline
+    # "not bullish" should be negative or neutral
+    score_pos  = _score_headline("Stock is bullish")
+    score_neg  = _score_headline("Stock is not bullish")
+    expect(score_pos > score_neg,
+           f"Negation should flip: 'bullish'={score_pos:.2f}, 'not bullish'={score_neg:.2f}")
+
+def test_sentiment_coverage_boost():
+    from backend.sentiment import _coverage_boost
+    boost_1  = _coverage_boost(1)
+    boost_10 = _coverage_boost(10)
+    expect(boost_1  >= 1.0, "Coverage boost should be >= 1")
+    expect(boost_10 > boost_1, f"More articles → higher boost: 1art={boost_1:.2f}, 10art={boost_10:.2f}")
+
+def test_ml_uses_new_sentiment():
+    src_txt = (ROOT / "backend/ml.py").read_text()
+    expect("fetch_sentiment_data_v2" in src_txt or "from backend.sentiment" in src_txt,
+           "ml.py must import from backend.sentiment")
+
+def test_predict_has_confidence_fields():
+    src_txt = (ROOT / "backend/ml.py").read_text()
+    expect("sent_confidence" in src_txt, "predict() must store sent_confidence")
+    expect("news_count"      in src_txt, "predict() must store news_count")
+    expect("news_latest"     in src_txt, "predict() must store news_latest")
+
+def test_no_beautifulsoup_import():
+    ml_src  = (ROOT / "backend/ml.py").read_text()
+    expect("BeautifulSoup" not in ml_src and "bs4" not in ml_src,
+           "ml.py must no longer import BeautifulSoup")
+
+def test_requirements_no_bs4():
+    reqs = (ROOT / "requirements.txt").read_text()
+    expect("beautifulsoup4" not in reqs, "requirements.txt must not include bs4")
+
+test("SENTIMENT — sentiment.py module exists",                  test_sentiment_module_exists)
+test("SENTIMENT — uses Google News RSS endpoint",               test_sentiment_has_google_news_url)
+test("SENTIMENT — requests are batched",                        test_sentiment_batched_fetch)
+test("SENTIMENT — parses pubDate for recency weighting",        test_sentiment_recency_weighting)
+test("SENTIMENT — negation handling ('not bullish'→negative)",  test_sentiment_negation_handling)
+test("SENTIMENT — intensifier scaling ('sharply surges')",      test_sentiment_intensifiers)
+test("SENTIMENT — extended lexicon (200+ terms)",               test_sentiment_200_plus_words)
+test("SENTIMENT — _score_headline returns correct polarity",    test_sentiment_score_function)
+test("SENTIMENT — negation actually flips score",               test_sentiment_negation_works)
+test("SENTIMENT — coverage boost scales with article count",    test_sentiment_coverage_boost)
+test("SENTIMENT — ml.py imports from backend.sentiment",        test_ml_uses_new_sentiment)
+test("SENTIMENT — predict() stores confidence + article count", test_predict_has_confidence_fields)
+test("SENTIMENT — ml.py no longer uses BeautifulSoup",         test_no_beautifulsoup_import)
+test("SENTIMENT — requirements.txt has no bs4",                 test_requirements_no_bs4)
+
 # ════════════════════════════════════════════════════════════════════════
 # REPORT
 # ════════════════════════════════════════════════════════════════════════
