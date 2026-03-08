@@ -160,24 +160,24 @@ _auth_mod._USERS_FILE    = _tmp_path / "users.json"
 _auth_mod._PORTFOLIO_DIR = _tmp_path / "portfolios"
 
 def test_auth_register_ok():
-    ok, msg = _auth_mod._local_register("test_user", "Test User", "test@x.com", "pass123")
+    ok, msg = _auth_mod._local_register("test_user", "Test User", "test@x.com", "TestP@ss99")
     expect(ok,  f"Register failed: {msg}")
     expect("Welcome" in msg, f"Unexpected message: {msg}")
 
 def test_auth_duplicate_username():
-    ok, msg = _auth_mod._local_register("test_user", "Another", "other@x.com", "pass123")
+    ok, msg = _auth_mod._local_register("test_user", "Another", "other@x.com", "TestP@ss99")
     expect(not ok, "Duplicate username should fail")
     expect("taken" in msg.lower(), f"Expected 'taken' in: {msg}")
 
 def test_auth_duplicate_email():
-    ok, msg = _auth_mod._local_register("other_user", "Other", "test@x.com", "pass123")
+    ok, msg = _auth_mod._local_register("other_user", "Other", "test@x.com", "TestP@ss99")
     expect(not ok, "Duplicate email should fail")
     expect("email" in msg.lower(), f"Expected 'email' in: {msg}")
 
 def test_auth_bad_username():
     cases = [("ab", "Too short"), ("a"*21, "Too long"), ("my user", "Space"), ("MY_USER!", "Special char")]
     for uname, reason in cases:
-        ok, _ = _auth_mod._local_register(uname, "Name", "u@u.com", "pass123")
+        ok, _ = _auth_mod._local_register(uname, "Name", "u@u.com", "TestP@ss99")
         expect(not ok, f"Bad username '{uname}' ({reason}) should fail")
 
 def test_auth_short_password():
@@ -185,14 +185,14 @@ def test_auth_short_password():
     expect(not ok, "Short password should fail")
 
 def test_auth_login_ok():
-    ok, msg, info = _auth_mod._local_login("test_user", "pass123")
+    ok, msg, info = _auth_mod._local_login("test_user", "TestP@ss99")
     expect(ok,                      f"Login failed: {msg}")
     expect(info["username"] == "test_user", "Wrong username in info")
     expect(info["name"] == "Test User",     "Wrong name in info")
     expect("password_hash" not in info,     "Hash leaked into user_info!")
 
 def test_auth_login_email():
-    ok, msg, info = _auth_mod._local_login("test@x.com", "pass123")
+    ok, msg, info = _auth_mod._local_login("test@x.com", "TestP@ss99")
     expect(ok, f"Email login failed: {msg}")
 
 def test_auth_wrong_password():
@@ -201,7 +201,7 @@ def test_auth_wrong_password():
     expect(info is None, "user_info should be None on failed login")
 
 def test_auth_unknown_user():
-    ok, msg, info = _auth_mod._local_login("nobody", "pass123")
+    ok, msg, info = _auth_mod._local_login("nobody", "TestP@ss99")
     expect(not ok, "Unknown user should fail")
 
 def test_auth_password_hashing():
@@ -209,7 +209,7 @@ def test_auth_password_hashing():
     users = json.loads((_tmp_path / "users.json").read_text())
     for u in users.values():
         h = u["password_hash"]
-        expect(h != "pass123", "Password stored in plain text!")
+        expect(h != "TestP@ss99", "Password stored in plain text!")
         expect(len(h) == 64,   f"SHA-256 hash should be 64 chars, got {len(h)}")
 
 def test_auth_portfolio_save_load():
