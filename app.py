@@ -45,10 +45,20 @@ st.set_page_config(
     initial_sidebar_state="expanded",   # open so user can see profile + logout
 )
 
+# ── DB self-heal — create tables + admin if missing ───────────────────────────
+from backend.db_setup import ensure_db
+ensure_db()
+
 # ── Auth gate ──────────────────────────────────────────────────────────────────
 from frontend.auth_page import render_auth_page
 from frontend.styles    import inject
 inject()
+
+# ── Self-healing DB init (creates tables + admin if missing) ──────────────────
+from backend.db_init import ensure_db
+if "db_ready" not in __import__("streamlit").session_state:
+    ensure_db()
+    __import__("streamlit").session_state["db_ready"] = True
 
 if not render_auth_page():
     st.stop()   # not logged in — show nothing else
@@ -74,6 +84,9 @@ from frontend import (
     render_all_stocks_table, render_empty_state,
 )
 from pipeline.report import generate
+from frontend.admin_dashboard import render_admin_dashboard
+from backend.auth import is_admin
+from frontend.admin_dashboard import render_admin_dashboard
 from frontend.analytics_components import (
     render_heatmap_tab, render_backtest_tab,
     render_correlation_tab, render_events_tab,
@@ -405,11 +418,18 @@ def _render_portfolio_tab():
 
 # ── No data yet ────────────────────────────────────────────────────────────────
 if not st.session_state["data"]:
-    _t1, _t2, _t3, _t4, _t5, _t6, _t7, _t8, _t9 = st.tabs([
+    _user_info = st.session_state.get("user_info", {})
+    _is_admin  = is_admin(_user_info)
+    _tabs_def  = [
         "📈  Top Gainers", "📉  Top Losers",
         "🤖  AI Predictions", "📋  All Stocks", "💼  My Portfolio",
         "🗺  Heatmap", "📊  Backtest", "🔗  Correlations", "📅  Events",
-    ])
+    ]
+    if _is_admin:
+        _tabs_def.append("🛡  Admin")
+    _tab_objs = st.tabs(_tabs_def)
+    _t1,_t2,_t3,_t4,_t5,_t6,_t7,_t8,_t9 = _tab_objs[:9]
+    _tadmin = _tab_objs[9] if _is_admin else None
     with _t1: render_empty_state()
     with _t2: render_empty_state()
     with _t3: render_empty_state()
@@ -419,6 +439,8 @@ if not st.session_state["data"]:
     with _t7: render_backtest_tab()
     with _t8: render_correlation_tab()
     with _t9: render_events_tab()
+    if _tadmin:
+        with _tadmin: render_admin_dashboard()
     st.stop()
 
 
@@ -458,17 +480,18 @@ st.markdown("<hr>", unsafe_allow_html=True)
 
 
 # ── Tabs ───────────────────────────────────────────────────────────────────────
-t1, t2, t3, t4, t5, t6, t7, t8, t9 = st.tabs([
-    "📈  Top Gainers",
-    "📉  Top Losers",
-    "🤖  AI Predictions",
-    "📋  All Stocks",
-    "💼  My Portfolio",
-    "🗺  Heatmap",
-    "📊  Backtest",
-    "🔗  Correlations",
-    "📅  Events",
-])
+_user_info = st.session_state.get("user_info", {})
+_is_admin  = is_admin(_user_info)
+_tabs_main = [
+    "📈  Top Gainers", "📉  Top Losers",
+    "🤖  AI Predictions", "📋  All Stocks", "💼  My Portfolio",
+    "🗺  Heatmap", "📊  Backtest", "🔗  Correlations", "📅  Events",
+]
+if _is_admin:
+    _tabs_main.append("🛡  Admin")
+_main_objs = st.tabs(_tabs_main)
+t1,t2,t3,t4,t5,t6,t7,t8,t9 = _main_objs[:9]
+tadmin = _main_objs[9] if _is_admin else None
 
 with t1:
     render_section("Top 10 Gainers", label)
@@ -524,3 +547,11 @@ with t8:
 
 with t9:
     render_events_tab()
+
+if _user_is_admin and _admin_tab:
+    with _admin_tab:
+        render_admin_dashboard()
+
+if tadmin:
+    with tadmin:
+        render_admin_dashboard()
