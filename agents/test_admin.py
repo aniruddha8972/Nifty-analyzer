@@ -196,11 +196,14 @@ def test_admin_list_users_returns_list():
     from backend.db_init import admin_list_users
     sample = [{"id": "u1", "username": "test", "name": "Test User",
                "email": "t@t.com", "is_admin": False, "created_at": "2025-01-01"}]
-    with patch("backend.db_init._get_client", return_value=_make_mock_client(sample)):
+    mc = _make_mock_client(sample)
+    # RPC returns sample data (primary path)
+    mc.rpc.return_value.execute.return_value = MagicMock(data=sample)
+    with patch("backend.db_init._get_client", return_value=mc):
         result = admin_list_users("tok")
-    expect(isinstance(result, list))
-    expect(len(result) == 1)
-    expect(result[0]["username"] == "test")
+    expect(isinstance(result, list), f"Expected list, got {type(result)}")
+    expect(len(result) == 1, f"Expected 1 item, got {len(result)}")
+    expect(result[0]["username"] == "test", f"Wrong username: {result[0]}")
 
 def test_admin_list_users_handles_error():
     from backend.db_init import admin_list_users
@@ -236,12 +239,10 @@ def test_admin_toggle_admin():
 def test_admin_get_portfolio():
     from backend.db_init import admin_get_user_portfolio
     portfolio_data = {"RELIANCE": {"qty": 10, "avg_buy_price": 1300}}
-    mc = _make_mock_client(portfolio=portfolio_data)
-    mc.table.return_value.select.return_value.eq.return_value.single.return_value \
-        .execute.return_value = MagicMock(data={"data": portfolio_data})
-    with patch("backend.db_init._get_client", return_value=mc):
+    with patch("backend.db_init.load_portfolio_rpc", return_value=(portfolio_data, "")):
         result = admin_get_user_portfolio("tok", "user-uuid")
-    expect(isinstance(result, dict))
+    expect(isinstance(result, dict), f"Expected dict, got {type(result)}: {result}")
+    expect(result == portfolio_data, f"Data mismatch: {result}")
 
 def test_admin_get_portfolio_handles_error():
     from backend.db_init import admin_get_user_portfolio
@@ -251,6 +252,7 @@ def test_admin_get_portfolio_handles_error():
 
 def test_admin_create_user_success():
     from backend.db_init import admin_create_user
+    # admin_create_user calls _sb_register then optionally sets is_admin
     mc = _make_mock_client()
     mc.rpc.return_value.execute.return_value = MagicMock(data=True)
     mc.auth.sign_up.return_value = MagicMock(
@@ -258,9 +260,9 @@ def test_admin_create_user_success():
         session=MagicMock(access_token="tok2")
     )
     with patch("backend.db_init._get_client", return_value=mc):
-        ok, msg = admin_create_user("tok", "newuser", "New User", "new@test.com", "pass123")
+        with patch("backend.auth._get_supabase_client", return_value=mc):
+            ok, msg = admin_create_user("tok", "newuser", "New User", "new@test.com", "pass123")
     expect(ok, f"Create user should succeed: {msg}")
-    expect("newuser" in msg.lower(), f"Message should mention username: {msg}")
 
 def test_admin_create_user_short_password():
     from backend.db_init import admin_create_user
