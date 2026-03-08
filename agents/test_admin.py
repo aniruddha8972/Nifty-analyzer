@@ -214,21 +214,31 @@ def test_admin_list_users_handles_error():
 def test_admin_delete_blocks_admin():
     from backend.db_init import admin_delete_user
     mc = _make_mock_client()
-    mc.table.return_value.select.return_value.eq.return_value.single.return_value \
-        .execute.return_value = MagicMock(data={"is_admin": True})
+    mc.rpc.return_value.execute.side_effect = Exception("Cannot delete an admin account")
     with patch("backend.db_init._get_client", return_value=mc):
         ok, msg = admin_delete_user("tok", "admin-uuid")
     expect(not ok, "Should block deletion of admin")
-    expect("cannot delete" in msg.lower(), f"Message should warn: {msg}")
+    expect("cannot delete" in msg.lower() or "admin" in msg.lower(), f"Msg: {msg}")
 
 def test_admin_delete_regular_user():
     from backend.db_init import admin_delete_user
     mc = _make_mock_client()
-    mc.table.return_value.select.return_value.eq.return_value.single.return_value \
-        .execute.return_value = MagicMock(data={"is_admin": False})
+    mc.rpc.return_value.execute.return_value = MagicMock(data="deleted")
     with patch("backend.db_init._get_client", return_value=mc):
         ok, msg = admin_delete_user("tok", "user-uuid")
     expect(ok, f"Should succeed for regular user: {msg}")
+    expect("deleted" in msg.lower(), f"Should confirm deletion: {msg}")
+
+def test_admin_delete_removes_auth_user():
+    """Verify delete calls the RPC that removes from auth.users."""
+    from backend.db_init import admin_delete_user
+    mc = _make_mock_client()
+    mc.rpc.return_value.execute.return_value = MagicMock(data="deleted")
+    with patch("backend.db_init._get_client", return_value=mc):
+        admin_delete_user("tok", "user-uuid")
+    rpc_calls = [str(c) for c in mc.rpc.call_args_list]
+    expect(any("admin_delete_user_full" in c for c in rpc_calls),
+           f"Must call admin_delete_user_full RPC. Calls: {rpc_calls}")
 
 def test_admin_toggle_admin():
     from backend.db_init import admin_toggle_admin
@@ -280,6 +290,7 @@ test("ADMIN_OPS — list_users returns list",        test_admin_list_users_retur
 test("ADMIN_OPS — list_users handles DB error",    test_admin_list_users_handles_error)
 test("ADMIN_OPS — delete blocks admin account",    test_admin_delete_blocks_admin)
 test("ADMIN_OPS — delete regular user works",      test_admin_delete_regular_user)
+test("ADMIN_OPS — delete calls auth RPC",          test_admin_delete_removes_auth_user)
 test("ADMIN_OPS — toggle admin flag works",        test_admin_toggle_admin)
 test("ADMIN_OPS — get portfolio returns dict",     test_admin_get_portfolio)
 test("ADMIN_OPS — get portfolio handles error",    test_admin_get_portfolio_handles_error)
