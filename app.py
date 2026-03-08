@@ -86,7 +86,7 @@ from frontend.admin_dashboard import render_admin_dashboard
 from backend.auth import is_admin
 from frontend.analytics_components import (
     render_heatmap_tab, render_backtest_tab,
-    render_correlation_tab, render_events_tab,
+    render_correlation_tab, render_events_tab, render_news_tab,
 )
 
 
@@ -542,12 +542,13 @@ if not st.session_state["data"]:
         "📈  Top Gainers", "📉  Top Losers",
         "🤖  AI Predictions", "📋  All Stocks", "💼  My Portfolio",
         "🗺  Heatmap", "📊  Backtest", "🔗  Correlations", "📅  Events",
+        "📰  News Feed",
     ]
     if _is_admin:
         _tabs_def.append("🛡  Admin")
     _tab_objs = st.tabs(_tabs_def)
-    _t1,_t2,_t3,_t4,_t5,_t6,_t7,_t8,_t9 = _tab_objs[:9]
-    _tadmin = _tab_objs[9] if _is_admin else None
+    _t1,_t2,_t3,_t4,_t5,_t6,_t7,_t8,_t9,_t10 = _tab_objs[:10]
+    _tadmin = _tab_objs[10] if _is_admin else None
     with _t1: render_empty_state()
     with _t2: render_empty_state()
     with _t3: render_empty_state()
@@ -556,7 +557,8 @@ if not st.session_state["data"]:
     with _t6: render_heatmap_tab([])
     with _t7: render_backtest_tab()
     with _t8: render_correlation_tab()
-    with _t9: render_events_tab()
+    with _t9:  render_events_tab()
+    with _t10: render_news_tab([])
     if _tadmin:
         with _tadmin: render_admin_dashboard()
     st.stop()
@@ -608,8 +610,8 @@ _tabs_main = [
 if _is_admin:
     _tabs_main.append("🛡  Admin")
 _main_objs = st.tabs(_tabs_main)
-t1,t2,t3,t4,t5,t6,t7,t8,t9 = _main_objs[:9]
-tadmin = _main_objs[9] if _is_admin else None
+t1,t2,t3,t4,t5,t6,t7,t8,t9,t10 = _main_objs[:10]
+tadmin = _main_objs[10] if _is_admin else None
 
 with t1:
     render_section("Top 10 Gainers", label)
@@ -667,6 +669,9 @@ with t8:
 
 with t9:
     render_events_tab()
+
+with t10:
+    render_news_tab(data)
 
 if tadmin:
     with tadmin:
