@@ -352,8 +352,8 @@ with ctrl_col0:
         key="idx_sel",
     )
     if selected_index != _prev_idx:
-        # Index changed — clear stale data
-        for _k in ["data", "from_d", "to_d"]:
+        # Index changed — clear all stale analysis caches
+        for _k in ["data", "from_d", "to_d", "bt_result", "corr_result"]:
             st.session_state.pop(_k, None)
         st.session_state["selected_index"] = selected_index
         st.rerun()
@@ -465,7 +465,11 @@ def _render_portfolio_tab():
     portfolio = st.session_state.get("portfolio", {})
 
     # ── Add holding form ──────────────────────────────────────────────
-    result = render_add_holding_form()
+    _active_uni = INDEX_UNIVERSE.get(
+        st.session_state.get("selected_index", "Nifty 50"),
+        INDEX_UNIVERSE["Nifty 50"]
+    )
+    result = render_add_holding_form(universe=_active_uni)
     if result:
         sym, qty, price, buy_date = result
         add_holding(sym, qty, price, buy_date)
