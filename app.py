@@ -74,6 +74,10 @@ from frontend import (
     render_all_stocks_table, render_empty_state,
 )
 from pipeline.report import generate
+from frontend.analytics_components import (
+    render_heatmap_tab, render_backtest_tab,
+    render_correlation_tab, render_events_tab,
+)
 
 
 # ── Session state defaults ─────────────────────────────────────────────────────
@@ -401,15 +405,20 @@ def _render_portfolio_tab():
 
 # ── No data yet ────────────────────────────────────────────────────────────────
 if not st.session_state["data"]:
-    _t1, _t2, _t3, _t4, _t5 = st.tabs([
+    _t1, _t2, _t3, _t4, _t5, _t6, _t7, _t8, _t9 = st.tabs([
         "📈  Top Gainers", "📉  Top Losers",
         "🤖  AI Predictions", "📋  All Stocks", "💼  My Portfolio",
+        "🗺  Heatmap", "📊  Backtest", "🔗  Correlations", "📅  Events",
     ])
     with _t1: render_empty_state()
     with _t2: render_empty_state()
     with _t3: render_empty_state()
     with _t4: render_empty_state()
     with _t5: _render_portfolio_tab()
+    with _t6: render_heatmap_tab([])
+    with _t7: render_backtest_tab()
+    with _t8: render_correlation_tab()
+    with _t9: render_events_tab()
     st.stop()
 
 
@@ -449,12 +458,16 @@ st.markdown("<hr>", unsafe_allow_html=True)
 
 
 # ── Tabs ───────────────────────────────────────────────────────────────────────
-t1, t2, t3, t4, t5 = st.tabs([
+t1, t2, t3, t4, t5, t6, t7, t8, t9 = st.tabs([
     "📈  Top Gainers",
     "📉  Top Losers",
     "🤖  AI Predictions",
     "📋  All Stocks",
     "💼  My Portfolio",
+    "🗺  Heatmap",
+    "📊  Backtest",
+    "🔗  Correlations",
+    "📅  Events",
 ])
 
 with t1:
@@ -499,3 +512,15 @@ with t4:
 
 with t5:
     _render_portfolio_tab()
+
+with t6:
+    render_heatmap_tab(data)
+
+with t7:
+    render_backtest_tab()
+
+with t8:
+    render_correlation_tab(portfolio_symbols=list(st.session_state.get('portfolio', {}).keys()))
+
+with t9:
+    render_events_tab()
