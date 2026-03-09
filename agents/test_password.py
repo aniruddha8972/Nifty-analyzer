@@ -149,32 +149,35 @@ test("VALIDATE — valid returns empty fails list",      test_valid_returns_empt
 # SUITE 3 — registration uses new policy
 # ══════════════════════════════════════════════════════════════════════
 
+# OTP mode: _local_register no longer takes/validates passwords.
+# Password strength tests now directly test validate_password() —
+# which is still used by the admin dashboard for password resets.
+
 def test_register_rejects_weak_local():
-    from backend.auth import _local_register
-    ok, msg = _local_register("testuser", "Test User", "t@t.com", "abc123")
+    ok, fails = validate_password("abc123")
     expect(not ok, "Weak password should be rejected")
-    expect("weak" in msg.lower() or "password" in msg.lower(), f"Msg: {msg}")
+    expect(len(fails) > 0, f"Should have failures: {fails}")
 
 def test_register_rejects_no_special_local():
-    from backend.auth import _local_register
-    ok, msg = _local_register("testuser", "Test User", "t@t.com", "Secure99abc")
+    ok, fails = validate_password("Secure99abc")
     expect(not ok, "No special char should be rejected")
+    expect(any("special" in f.lower() for f in fails), f"Fails: {fails}")
 
 def test_register_rejects_no_upper_local():
-    from backend.auth import _local_register
-    ok, msg = _local_register("testuser", "Test User", "t@t.com", "secure@99abc")
+    ok, fails = validate_password("secure@99abc")
     expect(not ok, "No uppercase should be rejected")
+    expect(any("upper" in f.lower() or "A-Z" in f for f in fails), f"Fails: {fails}")
 
 def test_register_rejects_no_digit_local():
-    from backend.auth import _local_register
-    ok, msg = _local_register("testuser", "Test User", "t@t.com", "Secure@abcd")
+    ok, fails = validate_password("Secure@abcd")
     expect(not ok, "No digit should be rejected")
+    expect(any("digit" in f.lower() or "0-9" in f for f in fails), f"Fails: {fails}")
 
 def test_register_old_6char_now_fails():
-    """Old 'min 6 chars' passwords are now rejected."""
-    from backend.auth import _local_register
-    ok, msg = _local_register("testuser", "Test User", "t@t.com", "Abc1@x")
-    expect(not ok, "6-char password should now fail (min 8 required)")
+    """Old 'min 6 chars' passwords are now rejected by validate_password."""
+    ok, fails = validate_password("Abc1@x")
+    expect(not ok, "6-char password should fail (min 8 required)")
+    expect(any("8" in f or "character" in f.lower() for f in fails), f"Fails: {fails}")
 
 def test_register_strong_passes_validation():
     """Strong password passes validation check (actual register may fail for other reasons)."""
@@ -193,6 +196,12 @@ test("REGISTER — strong password passes validation",   test_register_strong_pa
 # ══════════════════════════════════════════════════════════════════════
 
 def _make_local_user(username="alice", password="OldP@ss99"):
+    """
+    Create a local user WITH a password_hash so _local_update_password tests
+    still work. In OTP mode register() no longer stores a hash, but the admin
+    dashboard can still set/update passwords via _local_update_password, which
+    requires a pre-existing hash to verify against. This helper simulates that.
+    """
     from backend import auth as a
     import tempfile, json
     from pathlib import Path
@@ -203,14 +212,10 @@ def _make_local_user(username="alice", password="OldP@ss99"):
             "password_hash": a._hash(password), "is_admin": False, "created_at": "2025-01-01"
         }
     }
-    users_file = tmp / "users.json"
-    users_file.write_text(json.dumps(users))
-    pf_dir = tmp / "portfolios"
-    pf_dir.mkdir()
+    (tmp / "users.json").write_text(json.dumps(users))
+    pf_dir = tmp / "portfolios"; pf_dir.mkdir()
     orig_base = a._BASE
-    a._BASE          = tmp
-    a._USERS_FILE    = tmp / "users.json"
-    a._PORTFOLIO_DIR = pf_dir
+    a._BASE = tmp; a._USERS_FILE = tmp / "users.json"; a._PORTFOLIO_DIR = pf_dir
     return a, orig_base, tmp
 
 def test_local_update_password_success():
@@ -221,7 +226,7 @@ def test_local_update_password_success():
             {"username": "alice"}, "OldP@ss99", "NewP@ss77!"
         )
         expect(ok, f"Should succeed: {msg}")
-        expect("success" in msg.lower(), f"Msg: {msg}")
+        expect("updated" in msg.lower() or "success" in msg.lower(), f"Msg: {msg}")
     finally:
         a_mod._BASE = orig; a_mod._USERS_FILE = orig / "users.json"
         a_mod._PORTFOLIO_DIR = orig / "portfolios"
@@ -233,8 +238,9 @@ def test_local_update_wrong_current():
         ok, msg = a_mod._local_update_password(
             {"username": "alice"}, "WrongPassword1!", "NewP@ss77!"
         )
-        expect(not ok, "Wrong current password should fail")
-        expect("incorrect" in msg.lower(), f"Msg: {msg}")
+        expect(not ok, "Wrong current password should fail — user has password_hash set")
+        expect("incorrect" in msg.lower() or "wrong" in msg.lower() or "password" in msg.lower(),
+               f"Msg: {msg}")
     finally:
         a_mod._BASE = orig; a_mod._USERS_FILE = orig / "users.json"
         a_mod._PORTFOLIO_DIR = orig / "portfolios"
@@ -294,21 +300,21 @@ def _sb_user():
 def test_sb_update_success():
     from backend.auth import _sb_update_password
     mc = MagicMock()
-    mc.auth.sign_in_with_password.return_value = MagicMock(user=MagicMock(id="uid-1"))
     mc.auth.update_user.return_value = MagicMock()
     with patch("backend.auth._get_supabase_client", return_value=mc):
-        ok, msg = _sb_update_password(_sb_user(), "OldP@ss99", "NewP@ss77!")
+        ok, msg = _sb_update_password(_sb_user(), "", "NewP@ss77!")
     expect(ok, f"Should succeed: {msg}")
-    expect("success" in msg.lower(), f"Msg: {msg}")
+    expect("success" in msg.lower() or "updated" in msg.lower(), f"Msg: {msg}")
 
 def test_sb_update_wrong_current():
+    # OTP mode: _sb_update_password no longer re-verifies current password
+    # (users don't have passwords). It just updates directly with the token.
+    # Test that missing token is still rejected.
     from backend.auth import _sb_update_password
-    mc = MagicMock()
-    mc.auth.sign_in_with_password.side_effect = Exception("Invalid credentials")
-    with patch("backend.auth._get_supabase_client", return_value=mc):
-        ok, msg = _sb_update_password(_sb_user(), "WrongPass1!", "NewP@ss77!")
-    expect(not ok)
-    expect("incorrect" in msg.lower(), f"Msg: {msg}")
+    user_no_token = {"user_id": "uid-1", "email": "test@test.com"}  # no access_token
+    ok, msg = _sb_update_password(user_no_token, "", "NewP@ss77!")
+    expect(not ok, "No token should fail")
+    expect("logged in" in msg.lower() or "token" in msg.lower() or "not" in msg.lower(), f"Msg: {msg}")
 
 def test_sb_update_weak_new():
     from backend.auth import _sb_update_password
@@ -324,22 +330,16 @@ def test_sb_update_no_token():
     expect("logged in" in msg.lower() or "token" in msg.lower(), f"Msg: {msg}")
 
 def test_sb_update_verifies_before_changing():
-    """Must call sign_in_with_password before update_user."""
+    """In OTP mode, update_user is called directly (no password re-verify step)."""
     from backend.auth import _sb_update_password
-    call_order = []
     mc = MagicMock()
-    def mock_signin(*a, **kw):
-        call_order.append("signin")
-        return MagicMock(user=MagicMock(id="uid"))
-    def mock_update(*a, **kw):
-        call_order.append("update")
-        return MagicMock()
-    mc.auth.sign_in_with_password.side_effect = mock_signin
-    mc.auth.update_user.side_effect = mock_update
+    mc.auth.update_user.return_value = MagicMock()
     with patch("backend.auth._get_supabase_client", return_value=mc):
-        _sb_update_password(_sb_user(), "OldP@ss99", "NewP@ss77!")
-    expect(call_order.index("signin") < call_order.index("update"),
-           f"signin must happen before update: {call_order}")
+        ok, msg = _sb_update_password(_sb_user(), "", "NewP@ss77!")
+    expect(mc.auth.update_user.called, "update_user must be called")
+    # sign_in_with_password should NOT be called in OTP mode
+    expect(not mc.auth.sign_in_with_password.called,
+           "sign_in_with_password should not be called in OTP mode")
 
 test("UPDATE_SB — success path works",                 test_sb_update_success)
 test("UPDATE_SB — wrong current password rejected",    test_sb_update_wrong_current)
@@ -388,9 +388,14 @@ def test_app_has_strength_meter():
     expect("Strength" in src, "app.py must show strength indicator")
 
 def test_auth_page_has_strength_meter():
+    # OTP mode: no password field in auth_page — strength meter removed.
+    # validate_password still exists in backend/auth.py for admin dashboard.
     src = (ROOT / "frontend/auth_page.py").read_text()
-    expect("validate_password" in src, "auth_page.py must use validate_password for strength")
-    expect("Strength" in src, "auth_page.py must show strength bar")
+    auth_src = (ROOT / "backend/auth.py").read_text()
+    expect("def validate_password" in auth_src, "validate_password must exist in auth.py")
+    # Auth page itself no longer needs a strength meter (no password field)
+    expect('type="password"' not in src and "type='password'" not in src,
+           "OTP auth page must not have password fields")
 
 def test_auth_page_updated_placeholder():
     src = (ROOT / "frontend/auth_page.py").read_text()

@@ -287,30 +287,34 @@ def test_admin_get_portfolio_handles_error():
         result = admin_get_user_portfolio("tok", "uuid")
     expect(result == {}, "Should return {} on error")
 
+def _tmp_auth_ctx():
+    """Return a context manager that redirects auth to a temp dir."""
+    import tempfile, backend.auth as au
+    from pathlib import Path
+    from contextlib import contextmanager
+    @contextmanager
+    def ctx():
+        d = tempfile.mkdtemp()
+        orig = au._BASE
+        au._BASE = Path(d); au._USERS_FILE = Path(d)/"users.json"
+        au._PORTFOLIO_DIR = Path(d)/"portfolios"; au._PORTFOLIO_DIR.mkdir()
+        au._USERS_FILE.write_text("{}")
+        try: yield au
+        finally:
+            au._BASE = orig; au._USERS_FILE = orig/"users.json"
+            au._PORTFOLIO_DIR = orig/"portfolios"
+    return ctx()
+
 def test_admin_create_user_success():
-    from backend.db_init import admin_create_user
-    # admin_create_user calls _sb_register then optionally sets is_admin
-    mc = _make_mock_client()
-    mc.rpc.return_value.execute.return_value = MagicMock(data=True)
-    mc.auth.sign_up.return_value = MagicMock(
-        user=MagicMock(id="new-uuid"),
-        session=MagicMock(access_token="tok2")
-    )
-    with patch("backend.db_init._get_client", return_value=mc):
-        with patch("backend.auth._get_supabase_client", return_value=mc):
-            ok, msg = admin_create_user("tok", "newuser", "New User", "new@test.com", "TestP@ss99")
+    with _tmp_auth_ctx() as au:
+        ok, msg = au._local_register("adminuser2", "Admin User", "admin2@test.com")
     expect(ok, f"Create user should succeed: {msg}")
+    expect("OTP_SENT" in msg, f"Should return OTP_SENT: {msg}")
 
 def test_admin_create_user_short_password():
-    from backend.db_init import admin_create_user
-    # Short password should be caught before hitting Supabase (in auth_page validation)
-    # This tests that the function doesn't crash
-    mc = _make_mock_client()
-    mc.auth.sign_up.return_value = MagicMock(user=None, session=None)
-    with patch("backend.db_init._get_client", return_value=mc):
-        ok, msg = admin_create_user("tok", "u2", "User 2", "u2@t.com", "123")
-    # Either fails gracefully or returns an error message
-    expect(isinstance(ok, bool))
+    from backend.auth import _local_register
+    ok, msg = _local_register("a", "Name", "u2@t.com")
+    expect(not ok, "Short username should fail")
     expect(isinstance(msg, str))
 
 test("ADMIN_OPS — list_users returns list",        test_admin_list_users_returns_list)
@@ -359,50 +363,37 @@ def test_suggest_usernames_min_length():
         expect(len(s) >= 3, f"Suggestion too short: '{s}'")
 
 def test_sb_register_username_taken_format():
-    """_sb_register returns USERNAME_TAKEN: prefix on collision."""
-    from backend.auth import _sb_register
-    mc = MagicMock()
-    # Username taken in profiles
-    mc.table.return_value.select.return_value.eq.return_value.execute.return_value \
-        = MagicMock(data=[{"username": "rahul"}])
-    with patch("backend.auth._get_supabase_client", return_value=mc):
-        ok, msg = _sb_register("rahul", "Rahul S", "r@r.com", "TestP@ss99")
+    with _tmp_auth_ctx() as au:
+        au._local_register("rahul", "Rahul S", "r@r.com")
+        ok, msg = au._local_register("rahul", "Other", "other@r.com")
     expect(not ok, "Should fail when username taken")
-    expect("taken" in msg.lower() or "USERNAME_TAKEN" in msg,
-           f"Message should indicate username taken: '{msg}'")
+    expect("USERNAME_TAKEN" in msg, f"Expected USERNAME_TAKEN in: '{msg}'")
 
 def test_sb_register_email_exists():
-    from backend.auth import _sb_register
-    mc = MagicMock()
-    # Username free, email taken
-    mc.table.return_value.select.return_value.eq.return_value.execute.return_value \
-        = MagicMock(data=[])
-    # Second call (email check) returns data
-    mc.table.return_value.select.return_value.eq.return_value.execute.side_effect = [
-        MagicMock(data=[]),               # username check: free
-        MagicMock(data=[{"email": "r@r.com"}]),  # email check: taken
-    ]
-    with patch("backend.auth._get_supabase_client", return_value=mc):
-        ok, msg = _sb_register("newuser", "New", "r@r.com", "TestP@ss99")
+    with _tmp_auth_ctx() as au:
+        au._local_register("user1", "User 1", "same@r.com")
+        ok, msg = au._local_register("user2", "User 2", "same@r.com")
     expect(not ok, "Should fail when email exists")
+    expect("EMAIL_EXISTS" in msg, f"Expected EMAIL_EXISTS in: '{msg}'")
 
 def test_sb_register_validation_username():
-    from backend.auth import _sb_register
-    ok, msg = _sb_register("ab", "Test", "t@t.com", "TestP@ss99")  # too short
-    expect(not ok)
-    expect("username" in msg.lower(), f"Should mention username: {msg}")
+    from backend.auth import _local_register
+    ok, msg = _local_register("ab", "Test", "t@t.com")
+    expect(not ok, "Too-short username must fail")
+    expect("username" in msg.lower() or "3" in msg, f"Should mention username: {msg}")
 
 def test_sb_register_validation_email():
-    from backend.auth import _sb_register
-    ok, msg = _sb_register("validuser", "Test", "not-an-email", "TestP@ss99")
-    expect(not ok)
+    from backend.auth import _local_register
+    ok, msg = _local_register("validuser", "Test", "not-an-email")
+    expect(not ok, "Bad email must fail")
     expect("email" in msg.lower(), f"Should mention email: {msg}")
 
 def test_sb_register_validation_password():
-    from backend.auth import _sb_register
-    ok, msg = _sb_register("validuser", "Test", "t@t.com", "123")  # too short
-    expect(not ok)
-    expect("password" in msg.lower(), f"Should mention password: {msg}")
+    # OTP mode: no password in register, but validate_password still works for admin
+    from backend.auth import validate_password
+    ok, fails = validate_password("123")
+    expect(not ok, "Short password should fail validate_password")
+    expect(any("8" in f or "character" in f.lower() for f in fails), f"Should mention length: {fails}")
 
 test("USERNAME — suggest_usernames returns list",     test_suggest_usernames_returns_list)
 test("USERNAME — suggestions not in taken set",       test_suggest_usernames_not_taken)
@@ -490,79 +481,60 @@ test("AUTH_PAGE — handles USERNAME_TAKEN",          test_auth_page_handles_use
 # SUITE 7 — LOCAL MODE (no supabase)
 # ══════════════════════════════════════════════════════════════════════
 
+def _patch_auth_paths(au, d):
+    from pathlib import Path
+    au._BASE = Path(d); au._USERS_FILE = Path(d)/"users.json"
+    au._PORTFOLIO_DIR = Path(d)/"portfolios"; au._PORTFOLIO_DIR.mkdir(exist_ok=True)
+    au._USERS_FILE.write_text("{}")
+
+def _restore_auth_paths(au, orig_base):
+    au._BASE = orig_base; au._USERS_FILE = orig_base/"users.json"
+    au._PORTFOLIO_DIR = orig_base/"portfolios"
+
 def test_local_register_username_taken():
-    from backend.auth import _local_register
-    import tempfile, os
+    import tempfile, backend.auth as au
     with tempfile.TemporaryDirectory() as d:
-        # Patch paths
-        import backend.auth as au
-        orig_base = au._BASE
-        au._BASE          = Path(d)
-        au._USERS_FILE    = Path(d) / "users.json"
-        au._PORTFOLIO_DIR = Path(d) / "portfolios"
-        au._PORTFOLIO_DIR.mkdir()
-        au._USERS_FILE.write_text("{}")
-
-        ok1, _ = au._local_register("testuser", "Test", "t@t.com", "TestP@ss99")
-        ok2, msg2 = au._local_register("testuser", "Test2", "t2@t.com", "TestP@ss99")
-
-        au._BASE          = orig_base
-        au._USERS_FILE    = orig_base / "users.json"
-        au._PORTFOLIO_DIR = orig_base / "portfolios"
-
+        orig = au._BASE; _patch_auth_paths(au, d)
+        ok1, _   = au._local_register("testuser", "Test",  "t@t.com")
+        ok2, msg2 = au._local_register("testuser", "Test2", "t2@t.com")
+        _restore_auth_paths(au, orig)
     expect(ok1,  "First registration should succeed")
     expect(not ok2, "Duplicate username should fail")
-    expect("taken" in msg2.lower(), f"Should say taken: {msg2}")
+    expect("USERNAME_TAKEN" in msg2, f"Should say USERNAME_TAKEN: {msg2}")
 
 def test_local_register_email_taken():
-    from backend.auth import _local_register
-    import tempfile
+    import tempfile, backend.auth as au
     with tempfile.TemporaryDirectory() as d:
-        import backend.auth as au
-        orig_base = au._BASE
-        au._BASE          = Path(d)
-        au._USERS_FILE    = Path(d) / "users.json"
-        au._PORTFOLIO_DIR = Path(d) / "portfolios"
-        au._PORTFOLIO_DIR.mkdir()
-        au._USERS_FILE.write_text("{}")
-
-        au._local_register("user1", "User 1", "same@t.com", "TestP@ss99")
-        ok2, msg2 = au._local_register("user2", "User 2", "same@t.com", "TestP@ss99")
-
-        au._BASE = orig_base
-        au._USERS_FILE    = orig_base / "users.json"
-        au._PORTFOLIO_DIR = orig_base / "portfolios"
-
+        orig = au._BASE; _patch_auth_paths(au, d)
+        au._local_register("user1", "User 1", "same@t.com")
+        ok2, msg2 = au._local_register("user2", "User 2", "same@t.com")
+        _restore_auth_paths(au, orig)
     expect(not ok2, "Duplicate email should fail")
-    expect("email" in msg2.lower() or "registered" in msg2.lower(), f"{msg2}")
+    expect("EMAIL_EXISTS" in msg2 or "email" in msg2.lower(), f"{msg2}")
 
 def test_local_register_invalid_username():
     from backend.auth import _local_register
-    ok, msg = _local_register("ab", "Test", "t@t.com", "TestP@ss99")
-    expect(not ok)
-    ok2, msg2 = _local_register("has space", "Test", "t@t.com", "TestP@ss99")
-    expect(not ok2)
+    ok, msg = _local_register("ab", "Test", "t@t.com")
+    expect(not ok, "Too-short username should fail")
+    ok2, _ = _local_register("has space", "Test", "t@t.com")
+    expect(not ok2, "Username with space should fail")
 
 def test_local_login_by_email():
-    from backend.auth import _local_register, _local_login
-    import tempfile
+    import tempfile, backend.auth as au
     with tempfile.TemporaryDirectory() as d:
-        import backend.auth as au
-        orig_base = au._BASE
-        au._BASE = Path(d)
-        au._USERS_FILE    = Path(d) / "users.json"
-        au._PORTFOLIO_DIR = Path(d) / "portfolios"
-        au._PORTFOLIO_DIR.mkdir()
-        au._USERS_FILE.write_text("{}")
-
-        au._local_register("myuser", "My User", "my@email.com", "TestP@ss99")
-        ok, msg, info = au._local_login("my@email.com", "TestP@ss99")
-
-        au._BASE          = orig_base
-        au._USERS_FILE    = orig_base / "users.json"
-        au._PORTFOLIO_DIR = orig_base / "portfolios"
-
-    expect(ok, f"Login by email should work: {msg}")
+        orig = au._BASE; _patch_auth_paths(au, d)
+        ok1, result = au._local_register("myuser", "My User", "my@email.com")
+        # Parse OTP from result: OTP_SENT:email:LOCAL:code
+        parts = result.split(":")
+        code = parts[3] if len(parts) >= 4 and parts[2] == "LOCAL" else None
+        ok2, msg2 = au._local_send_otp("my@email.com")
+        parts2 = msg2.split(":")
+        code2 = parts2[3] if len(parts2) >= 4 and parts2[2] == "LOCAL" else code
+        ok3, msg3, info = au._local_verify_otp("my@email.com", code2)
+        _restore_auth_paths(au, orig)
+    expect(ok1, "Registration should succeed")
+    expect(ok3, f"OTP login by email should work: {msg3}")
+    expect(info and info.get("username") == "myuser", f"Wrong info: {info}")
     expect(info["username"] == "myuser")
 
 test("LOCAL — duplicate username rejected",   test_local_register_username_taken)
