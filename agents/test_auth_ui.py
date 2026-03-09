@@ -139,8 +139,10 @@ def test_back_button():
     expect("Go Back" in src or "go_back" in src or "otp_back" in src, "Must have back button from OTP step")
 
 def test_six_digit_validation():
-    expect("len" in src and "6" in src and "isdigit" in src,
-           "Must validate 6-digit numeric OTP")
+    # Supabase can send 6 or 8 digit codes depending on template/config
+    expect("isdigit" in src, "Must validate numeric OTP")
+    expect("6 <=" in src or "len(code) != 6" in src or "6–8" in src,
+           "Must validate OTP length (6–8 digits)")
 
 # ── auth.py OTP backend tests ─────────────────────────────────────────────────
 
