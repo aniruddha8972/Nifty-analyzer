@@ -270,6 +270,13 @@ body,
   font-size:10px;color:#18182a;letter-spacing:.3px;
 }
 
+/* ── Hide tab-switcher helper buttons (JS triggers them) ── */
+/* They're identified by their text matching the tab key values */
+[data-testid="stButton"]:has(> button > div > p:first-child:last-child){
+  /* Will be hidden after JS adds nse-sw class */
+}
+.nse-sw-hidden { display:none !important; overflow:hidden !important; height:0 !important; margin:0 !important; padding:0 !important; }
+
 /* ── Mobile stacking for two-column form rows ── */
 @media(max-width:440px){
   [data-testid="stHorizontalBlock"]{flex-direction:column !important;}
@@ -379,13 +386,15 @@ def _strength_html(pw: str) -> str:
 
 
 def _sw_btn(key: str):
-    """Render a hidden switcher button tagged with data-sw-btn for JS targeting."""
-    st.markdown(f'<div data-sw-btn="{key}" style="display:none">', unsafe_allow_html=True)
+    """
+    Render a Streamlit button hidden purely via CSS (no HTML wrapper).
+    The button is hidden by targeting its key via data-testid.
+    JS finds it by the button's visible text content.
+    """
     if st.button(key, key=f"_sw_{key}"):
         st.session_state["auth_tab"] = key
         if key == "forgot": st.session_state["reset_sent"] = False
         st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
 
 
 def _render_login(sb_mode: bool):
@@ -503,8 +512,28 @@ def render_auth_page() -> bool:
     # ── 2. Canvas (animated in step 6) ──────────────────────────────
     st.markdown(_CANVAS, unsafe_allow_html=True)
 
-    # ── 3. Hidden switcher buttons (DOM-accessible by JS) ───────────
+    # ── 3. Switcher buttons hidden via JS after render ─────────────
     _sw_btn("login"); _sw_btn("register"); _sw_btn("forgot")
+    # JS will hide these buttons AND wire them to the visual tab strip
+    st.markdown("""
+    <script>
+    (function(){
+      function hideSwitchers(){
+        var btns = document.querySelectorAll('[data-testid="stButton"] button');
+        btns.forEach(function(btn){
+          var txt = btn.innerText.trim();
+          if(txt==='login'||txt==='register'||txt==='forgot'){
+            var wrapper = btn.closest('[data-testid="stButton"]');
+            if(wrapper){ wrapper.classList.add('nse-sw-hidden'); }
+          }
+        });
+      }
+      hideSwitchers();
+      setTimeout(hideSwitchers, 100);
+      setTimeout(hideSwitchers, 400);
+    })();
+    </script>
+    """, unsafe_allow_html=True)
 
     # ── 4. Page shell + card header (pure HTML, no widgets inside) ──
     badge_cls ="chip-cloud" if sb_mode else "chip-local"
