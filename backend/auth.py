@@ -547,6 +547,13 @@ def logout(user_info: dict) -> None:
 def request_password_reset(email: str) -> tuple[bool, str]:
     """
     Send a password-reset email via Supabase Auth.
+
+    REDIRECT URL FIX:
+      Supabase reset emails default to localhost if no redirect_to is set.
+      We read the app's public URL from st.secrets["app"]["url"] and pass
+      it as redirect_to so the link lands back on the live Streamlit app.
+      Falls back to the Supabase project URL if not configured.
+
     In local mode, returns a friendly message (no email server).
     """
     email = email.strip().lower()
@@ -555,15 +562,28 @@ def request_password_reset(email: str) -> tuple[bool, str]:
 
     if _use_supabase():
         try:
+            import streamlit as st
+
+            # Determine redirect URL — points back to the live app
+            try:
+                redirect_url = st.secrets["app"]["url"].rstrip("/")
+            except Exception:
+                # Fallback: derive from Supabase project URL
+                sb_url = st.secrets.get("supabase", {}).get("url", "")
+                redirect_url = sb_url  # better than localhost
+
             client = _get_supabase_client()
-            client.auth.reset_password_email(email)
+            client.auth.reset_password_email(
+                email,
+                options={"redirect_to": redirect_url},
+            )
             # Always return success to avoid email enumeration
-            return True, "If that email is registered, a reset link has been sent. Check your inbox."
+            return True, "Reset link sent — check your inbox."
         except Exception:
-            return True, "If that email is registered, a reset link has been sent. Check your inbox."
+            return True, "Reset link sent — check your inbox."
     else:
-        # Local mode — no email server, but acknowledge the request
-        return True, "Local mode: no email server configured. Ask your admin to reset your password directly."
+        # Local mode — no email server
+        return True, "Local mode: no email server. Ask your admin to reset your password via the Admin dashboard."
 
 
 def load_user_portfolio(user_info: dict) -> dict:
