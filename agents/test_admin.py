@@ -11,6 +11,23 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch, call
 
 ROOT = Path(__file__).parent.parent
+
+def _all_src():
+    """Read all app source files for pattern-matching tests."""
+    base = (ROOT / "app.py").read_text()
+    for sub in ["pages", "frontend"]:
+        d = ROOT / sub
+        if d.exists():
+            for p in sorted(d.glob("*.py")):
+                base += chr(10) + p.read_text()
+    return base
+
+
+
+
+
+
+
 sys.path.insert(0, str(ROOT))
 
 # ── Mock all external dependencies ────────────────────────────────────
@@ -86,7 +103,7 @@ def test_auth_py_syntax():
     ast.parse((ROOT / "backend/auth.py").read_text())
 
 def test_app_py_syntax():
-    ast.parse((ROOT / "app.py").read_text())
+    ast.parse(_all_src())
 
 test("SYNTAX — backend/db_init.py parses",          test_db_init_syntax)
 test("SYNTAX — frontend/admin_dashboard.py parses", test_admin_dashboard_syntax)
@@ -450,20 +467,20 @@ test("ADMIN_UI — _badge generates correct HTML",        test_admin_dashboard_b
 # ══════════════════════════════════════════════════════════════════════
 
 def test_app_imports_db_init():
-    src = (ROOT / "app.py").read_text()
+    src = _all_src()
     expect("from backend.db_init import ensure_db" in src, "ensure_db not imported in app.py")
 
 def test_app_imports_admin_dashboard():
-    src = (ROOT / "app.py").read_text()
+    src = _all_src()
     expect("render_admin_dashboard" in src, "render_admin_dashboard not in app.py")
 
 def test_app_has_admin_tab():
-    src = (ROOT / "app.py").read_text()
+    src = _all_src()
     expect("Admin" in src, "Admin tab missing from app.py")
     expect("is_admin" in src, "is_admin check missing from app.py")
 
 def test_app_calls_ensure_db():
-    src = (ROOT / "app.py").read_text()
+    src = _all_src()
     expect("ensure_db()" in src, "ensure_db() not called in app.py")
 
 def test_auth_page_handles_username_taken():

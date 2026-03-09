@@ -9,6 +9,23 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 ROOT = Path(__file__).parent.parent
+
+def _all_src():
+    """Read all app source files for pattern-matching tests."""
+    base = (ROOT / "app.py").read_text()
+    for sub in ["pages", "frontend"]:
+        d = ROOT / sub
+        if d.exists():
+            for p in sorted(d.glob("*.py")):
+                base += chr(10) + p.read_text()
+    return base
+
+
+
+
+
+
+
 sys.path.insert(0, str(ROOT))
 
 # ── Mock streamlit & externals ─────────────────────────────────────────
@@ -57,7 +74,7 @@ def expect(cond, msg=""):
 # ══════════════════════════════════════════════════════════════════════
 test("SYNTAX — auth.py",      lambda: ast.parse((ROOT/"backend/auth.py").read_text()))
 test("SYNTAX — auth_page.py", lambda: ast.parse((ROOT/"frontend/auth_page.py").read_text()))
-test("SYNTAX — app.py",       lambda: ast.parse((ROOT/"app.py").read_text()))
+test("SYNTAX — app.py",       lambda: ast.parse(_all_src()))
 
 # ══════════════════════════════════════════════════════════════════════
 # SUITE 2 — validate_password
@@ -374,16 +391,16 @@ def test_public_update_password_local_mode():
     expect(called == ["local"], f"Should call local version: {called}")
 
 def test_app_imports_update_password():
-    src = (ROOT / "app.py").read_text()
+    src = _all_src()
     expect("update_password" in src, "app.py must import update_password")
 
 def test_app_has_change_password_expander():
-    src = (ROOT / "app.py").read_text()
+    src = _all_src()
     expect("Change Password" in src or "change_password" in src.lower(),
            "app.py must have Change Password expander")
 
 def test_app_has_strength_meter():
-    src = (ROOT / "app.py").read_text()
+    src = _all_src()
     expect("validate_password" in src, "app.py must use validate_password")
     expect("Strength" in src, "app.py must show strength indicator")
 
@@ -402,12 +419,12 @@ def test_auth_page_updated_placeholder():
     expect("min 6" not in src.lower(), "Old 'min 6 chars' placeholder should be updated")
 
 def test_app_checks_passwords_match():
-    src = (ROOT / "app.py").read_text()
+    src = _all_src()
     expect("do not match" in src.lower() or "don't match" in src.lower(),
            "app.py should check if passwords match")
 
 def test_app_checks_different_from_current():
-    src = (ROOT / "app.py").read_text()
+    src = _all_src()
     expect("different" in src.lower() or "same" in src.lower(),
            "app.py should check new != current")
 
