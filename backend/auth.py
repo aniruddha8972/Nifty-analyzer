@@ -248,8 +248,8 @@ def _sb_send_otp(email: str) -> tuple[bool, str]:
 def _sb_verify_otp(email: str, token: str) -> tuple[bool, str, dict | None]:
     email = email.strip().lower()
     token = token.strip()
-    if not token or len(token) != 6 or not token.isdigit():
-        return False, "Enter the 6-digit code from your email", None
+    if not token or not (6 <= len(token) <= 8) or not token.isdigit():
+        return False, "Enter the code from your email (6–8 digits)", None
 
     try:
         client = _get_supabase_client()
@@ -414,8 +414,8 @@ def _local_send_otp(email: str) -> tuple[bool, str]:
 
 def _local_verify_otp(email: str, token: str) -> tuple[bool, str, dict | None]:
     email = email.strip().lower()
-    if not token or len(token) != 6 or not token.isdigit():
-        return False, "Enter the 6-digit code shown on screen", None
+    if not token or not (6 <= len(token) <= 8) or not token.isdigit():
+        return False, "Enter the code shown on screen (6–8 digits)", None
     if not _local_verify_otp_code(email, token):
         return False, "Invalid or expired code — request a new one", None
     users = _load_users()
