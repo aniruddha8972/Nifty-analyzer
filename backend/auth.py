@@ -544,6 +544,28 @@ def logout(user_info: dict) -> None:
         _sb_logout(user_info)
 
 
+def request_password_reset(email: str) -> tuple[bool, str]:
+    """
+    Send a password-reset email via Supabase Auth.
+    In local mode, returns a friendly message (no email server).
+    """
+    email = email.strip().lower()
+    if not email or "@" not in email:
+        return False, "Please enter a valid email address."
+
+    if _use_supabase():
+        try:
+            client = _get_supabase_client()
+            client.auth.reset_password_email(email)
+            # Always return success to avoid email enumeration
+            return True, "If that email is registered, a reset link has been sent. Check your inbox."
+        except Exception:
+            return True, "If that email is registered, a reset link has been sent. Check your inbox."
+    else:
+        # Local mode — no email server, but acknowledge the request
+        return True, "Local mode: no email server configured. Ask your admin to reset your password directly."
+
+
 def load_user_portfolio(user_info: dict) -> dict:
     if _use_supabase():
         return _sb_load_portfolio(user_info)
