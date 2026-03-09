@@ -449,3 +449,207 @@ def fetch_sentiment_data_v2(symbols: tuple) -> dict:
         }
         for sym, v in full.items()
     }
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  GLOBAL SENTIMENT — World & Macro News
+# ══════════════════════════════════════════════════════════════════════
+
+# Global news RSS feeds — no API key needed
+_GLOBAL_FEEDS = {
+    "Reuters Business":   "https://feeds.reuters.com/reuters/businessNews",
+    "BBC Business":       "https://feeds.bbci.co.uk/news/business/rss.xml",
+    "CNBC Markets":       "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20910258",
+    "FT Markets":         "https://www.ft.com/rss/home/uk",
+    "ET Markets":         "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms",
+    "Moneycontrol":       "https://www.moneycontrol.com/rss/latestnews.xml",
+    "NSE India":          "https://www.nseindia.com/feed/rss_nse.xml",
+    "Investing.com":      "https://www.investing.com/rss/news_25.rss",
+}
+
+# Global macro keywords with sentiment weights (India-market-aware)
+_GLOBAL_POS: dict[str, float] = {
+    "rally": 2.0, "bullish": 2.0, "surge": 1.8, "soar": 1.8, "boom": 1.8,
+    "growth": 1.5, "recovery": 1.5, "optimism": 1.5, "upbeat": 1.5, "positive": 1.2,
+    "gdp growth": 2.0, "rate cut": 2.0, "stimulus": 1.8, "easing": 1.5,
+    "fed pivot": 2.0, "rate pause": 1.8, "inflation cooling": 2.0,
+    "strong economy": 1.8, "job growth": 1.5, "earnings beat": 1.8,
+    "trade deal": 1.8, "investment": 1.2, "fii buying": 2.0,
+    "foreign inflow": 1.8, "rupee strengthens": 1.5, "rbi supportive": 1.8,
+    "emerging markets": 1.2, "india outperforms": 2.0,
+}
+_GLOBAL_NEG: dict[str, float] = {
+    "crash": 2.5, "collapse": 2.5, "recession": 2.2, "crisis": 2.0, "panic": 2.0,
+    "selloff": 2.0, "plunge": 2.0, "slump": 1.8, "decline": 1.5, "fall": 1.2,
+    "rate hike": 2.0, "hawkish": 1.8, "inflation surge": 2.0, "stagflation": 2.2,
+    "war": 2.0, "conflict": 1.8, "geopolitical": 1.5, "sanctions": 1.8,
+    "trade war": 2.0, "tariff": 1.5, "default": 2.2, "debt crisis": 2.5,
+    "fii selling": 2.0, "foreign outflow": 1.8, "rupee falls": 1.5,
+    "crude oil surge": 1.8, "dollar strengthens": 1.5, "yield spike": 1.8,
+    "banking crisis": 2.5, "layoffs": 1.5, "contraction": 1.8,
+}
+
+
+def _score_global_headline(text: str, pub_dt=None) -> float:
+    """Score a global macro headline — similar to _score_headline but uses global lexicon."""
+    text_l = text.lower()
+    score  = 0.0
+
+    # Multi-word phrases first
+    for phrase, w in _GLOBAL_POS.items():
+        if phrase in text_l:
+            score += w
+    for phrase, w in _GLOBAL_NEG.items():
+        if phrase in text_l:
+            score -= w
+
+    # Single-word fallback from main lexicon
+    for word in re.findall(r'\b[a-z]+\b', text_l):
+        score += _POS.get(word, 0.0)
+        score -= _NEG.get(word, 0.0)
+
+    # Recency weight
+    if pub_dt:
+        try:
+            now = datetime.now(timezone.utc)
+            if pub_dt.tzinfo is None:
+                pub_dt = pub_dt.replace(tzinfo=timezone.utc)
+            age_h = (now - pub_dt).total_seconds() / 3600
+            if   age_h <  6: score *= 3.0
+            elif age_h < 24: score *= 2.0
+            elif age_h < 48: score *= 1.0
+            else:             score *= 0.5
+        except Exception:
+            pass
+
+    return score
+
+
+@st.cache_data(ttl=1800, show_spinner=False)  # 30-min cache
+def fetch_global_sentiment() -> dict:
+    """
+    Fetch and score global/macro news from Reuters, BBC, CNBC, ET, etc.
+
+    Returns:
+    {
+      "overall_score":  float,          # -1.0 to +1.0  (global market mood)
+      "india_score":    float,          # score from India-specific feeds only
+      "world_score":    float,          # score from international feeds
+      "confidence":     float,          # 0.0 to 1.0
+      "n_articles":     int,
+      "headlines":      list[dict],     # [{title, source, pub_dt, score}]
+      "by_source":      dict,           # {source_name: {score, n}}
+      "mood":           str,            # "Bullish" | "Neutral" | "Bearish"
+      "mood_color":     str,            # hex color
+    }
+    """
+    import math
+    import urllib.request
+
+    all_items: list[dict] = []
+    by_source: dict[str, dict] = {}
+
+    india_feeds  = {"ET Markets", "Moneycontrol", "NSE India"}
+    world_feeds  = set(_GLOBAL_FEEDS.keys()) - india_feeds
+
+    for source, url in _GLOBAL_FEEDS.items():
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "Mozilla/5.0 (compatible; NSEAnalyzer/1.0)"}
+            )
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                xml = resp.read().decode("utf-8", errors="replace")
+
+            items = re.findall(r'<item[^>]*>(.*?)</item>', xml, re.DOTALL)
+            feed_scores = []
+
+            for item in items[:15]:  # max 15 per feed
+                title_m = re.search(r'<title[^>]*><!\[CDATA\[(.*?)\]\]></title>', item) \
+                       or re.search(r'<title[^>]*>(.*?)</title>', item, re.DOTALL)
+                date_m  = re.search(r'<pubDate>(.*?)</pubDate>', item)
+
+                if not title_m:
+                    continue
+
+                title = re.sub(r'<[^>]+>', '', title_m.group(1)).strip()
+                pub_dt = None
+                if date_m:
+                    try:
+                        pub_dt = parsedate_to_datetime(date_m.group(1).strip())
+                    except Exception:
+                        pass
+
+                # Skip if older than 48h
+                if pub_dt:
+                    try:
+                        now = datetime.now(timezone.utc)
+                        if pub_dt.tzinfo is None:
+                            pub_dt = pub_dt.replace(tzinfo=timezone.utc)
+                        if (now - pub_dt).total_seconds() > 172800:
+                            continue
+                    except Exception:
+                        pass
+
+                sc = _score_global_headline(title, pub_dt)
+                feed_scores.append(sc)
+                all_items.append({
+                    "title":   title,
+                    "source":  source,
+                    "pub_dt":  pub_dt,
+                    "score":   sc,
+                    "is_india": source in india_feeds,
+                })
+
+            if feed_scores:
+                by_source[source] = {
+                    "score": round(math.tanh(sum(feed_scores) / max(len(feed_scores)**0.5, 1)), 3),
+                    "n":     len(feed_scores),
+                }
+
+        except Exception:
+            by_source[source] = {"score": 0.0, "n": 0, "error": True}
+
+    if not all_items:
+        return {
+            "overall_score": 0.0, "india_score": 0.0, "world_score": 0.0,
+            "confidence": 0.0, "n_articles": 0, "headlines": [],
+            "by_source": by_source, "mood": "Neutral", "mood_color": "#f59e0b",
+        }
+
+    # Overall score
+    all_scores  = [it["score"] for it in all_items]
+    n           = len(all_scores)
+    raw_total   = sum(all_scores)
+    overall     = float(math.tanh(raw_total / max(n**0.5, 1)))
+    confidence  = min(1.0, n / 40.0 * 0.7 + abs(overall) * 0.3)
+
+    # India vs world
+    india_scores = [it["score"] for it in all_items if it["is_india"]]
+    world_scores = [it["score"] for it in all_items if not it["is_india"]]
+    india_sc = float(math.tanh(sum(india_scores) / max(len(india_scores)**0.5, 1))) if india_scores else 0.0
+    world_sc = float(math.tanh(sum(world_scores) / max(len(world_scores)**0.5, 1))) if world_scores else 0.0
+
+    # Sort by recency, pick top 20
+    top_items = sorted(
+        all_items,
+        key=lambda x: x["pub_dt"] or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True
+    )[:20]
+
+    # Mood
+    if   overall >  0.20: mood, mood_color = "Bullish",  "#00e5a0"
+    elif overall < -0.20: mood, mood_color = "Bearish",  "#ff4560"
+    else:                  mood, mood_color = "Neutral",  "#f59e0b"
+
+    return {
+        "overall_score": round(overall, 3),
+        "india_score":   round(india_sc, 3),
+        "world_score":   round(world_sc, 3),
+        "confidence":    round(confidence, 3),
+        "n_articles":    n,
+        "headlines":     top_items,
+        "by_source":     by_source,
+        "mood":          mood,
+        "mood_color":    mood_color,
+    }
