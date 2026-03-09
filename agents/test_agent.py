@@ -160,57 +160,73 @@ _auth_mod._USERS_FILE    = _tmp_path / "users.json"
 _auth_mod._PORTFOLIO_DIR = _tmp_path / "portfolios"
 
 def test_auth_register_ok():
-    ok, msg = _auth_mod._local_register("test_user", "Test User", "test@x.com", "TestP@ss99")
+    # OTP mode: register takes no password, returns OTP_SENT:<email>:LOCAL:<code>
+    ok, msg = _auth_mod._local_register("test_user", "Test User", "test@x.com")
     expect(ok,  f"Register failed: {msg}")
-    expect("Welcome" in msg, f"Unexpected message: {msg}")
+    expect("OTP_SENT" in msg, f"Expected OTP_SENT in: {msg}")
 
 def test_auth_duplicate_username():
-    ok, msg = _auth_mod._local_register("test_user", "Another", "other@x.com", "TestP@ss99")
+    ok, msg = _auth_mod._local_register("test_user", "Another", "other@x.com")
     expect(not ok, "Duplicate username should fail")
-    expect("taken" in msg.lower(), f"Expected 'taken' in: {msg}")
+    expect("USERNAME_TAKEN" in msg, f"Expected USERNAME_TAKEN in: {msg}")
 
 def test_auth_duplicate_email():
-    ok, msg = _auth_mod._local_register("other_user", "Other", "test@x.com", "TestP@ss99")
+    ok, msg = _auth_mod._local_register("other_user", "Other", "test@x.com")
     expect(not ok, "Duplicate email should fail")
-    expect("email" in msg.lower(), f"Expected 'email' in: {msg}")
+    expect("EMAIL_EXISTS" in msg, f"Expected EMAIL_EXISTS in: {msg}")
 
 def test_auth_bad_username():
     cases = [("ab", "Too short"), ("a"*21, "Too long"), ("my user", "Space"), ("MY_USER!", "Special char")]
     for uname, reason in cases:
-        ok, _ = _auth_mod._local_register(uname, "Name", "u@u.com", "TestP@ss99")
+        ok, _ = _auth_mod._local_register(uname, "Name", "u@u.com")
         expect(not ok, f"Bad username '{uname}' ({reason}) should fail")
 
 def test_auth_short_password():
-    ok, msg = _auth_mod._local_register("new_user2", "Name", "n2@x.com", "abc")
-    expect(not ok, "Short password should fail")
+    # OTP mode: no password required — this test verifies validate_password still works
+    ok, fails = _auth_mod.validate_password("abc")
+    expect(not ok, "Short password should fail validate_password")
+    expect(len(fails) > 0, "Should have failure reasons")
 
 def test_auth_login_ok():
-    ok, msg, info = _auth_mod._local_login("test_user", "TestP@ss99")
-    expect(ok,                      f"Login failed: {msg}")
-    expect(info["username"] == "test_user", "Wrong username in info")
-    expect(info["name"] == "Test User",     "Wrong name in info")
+    # OTP: send_otp then verify. In local mode, code is in the result string.
+    ok, result = _auth_mod._local_send_otp("test@x.com")
+    expect(ok, f"send_otp failed: {result}")
+    expect("OTP_SENT" in result, f"Expected OTP_SENT: {result}")
+    parts = result.split(":")
+    code = parts[3] if len(parts) >= 4 and parts[2] == "LOCAL" else None
+    expect(code is not None, "Local mode must include code in result")
+    ok2, msg2, info = _auth_mod._local_verify_otp("test@x.com", code)
+    expect(ok2, f"verify_otp failed: {msg2}")
+    expect(info["username"] == "test_user", f"Wrong username: {info.get('username')}")
+    expect(info["name"] == "Test User",     f"Wrong name: {info.get('name')}")
     expect("password_hash" not in info,     "Hash leaked into user_info!")
 
 def test_auth_login_email():
-    ok, msg, info = _auth_mod._local_login("test@x.com", "TestP@ss99")
-    expect(ok, f"Email login failed: {msg}")
+    # OTP flow: send new OTP and verify
+    ok, result = _auth_mod._local_send_otp("test@x.com")
+    expect(ok, f"send_otp failed: {result}")
+    parts = result.split(":")
+    code = parts[3] if len(parts) >= 4 else None
+    expect(code, "Expected local OTP code")
+    ok2, msg2, info = _auth_mod._local_verify_otp("test@x.com", code)
+    expect(ok2, f"Email OTP login failed: {msg2}")
 
 def test_auth_wrong_password():
-    ok, msg, info = _auth_mod._local_login("test_user", "wrongpass")
-    expect(not ok, "Wrong password should fail")
-    expect(info is None, "user_info should be None on failed login")
+    # OTP: wrong code should fail
+    _auth_mod._local_send_otp("test@x.com")  # generate fresh OTP
+    ok, msg, info = _auth_mod._local_verify_otp("test@x.com", "000000")
+    expect(not ok, "Wrong OTP should fail")
+    expect(info is None, "user_info should be None on failed verify")
 
 def test_auth_unknown_user():
-    ok, msg, info = _auth_mod._local_login("nobody", "TestP@ss99")
-    expect(not ok, "Unknown user should fail")
+    ok, msg = _auth_mod._local_send_otp("nobody@x.com")
+    expect(not ok, "Unknown email should fail send_otp")
 
 def test_auth_password_hashing():
-    # Passwords must never be stored in plain text
+    # OTP mode: no password_hash stored — users.json should NOT contain password hashes
     users = json.loads((_tmp_path / "users.json").read_text())
     for u in users.values():
-        h = u["password_hash"]
-        expect(h != "TestP@ss99", "Password stored in plain text!")
-        expect(len(h) == 64,   f"SHA-256 hash should be 64 chars, got {len(h)}")
+        expect("password_hash" not in u, "OTP mode: password_hash must not be stored")
 
 def test_auth_portfolio_save_load():
     pf = {"RELIANCE": {"symbol":"RELIANCE","sector":"Energy","qty":50,"avg_buy_price":1320.0,"lots":[]}}
