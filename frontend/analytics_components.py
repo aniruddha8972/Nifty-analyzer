@@ -897,3 +897,383 @@ def render_news_tab(data: list[dict]) -> None:
 
         </div>
         """, unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  NIFTY INDEX CHARTS TAB
+# ══════════════════════════════════════════════════════════════════════
+
+def render_index_charts_tab() -> None:
+    """
+    Live Nifty index charts — 4 indices × 6 timeframes.
+    Uses yfinance for OHLCV, Plotly for candlestick + volume.
+    """
+    import streamlit as st
+    import yfinance as yf
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+    from datetime import date, timedelta
+    import pandas as pd
+
+    _section("Nifty Index Charts", "Live · OHLCV candlestick · Select index & timeframe")
+
+    # ── Index selector ────────────────────────────────────────────────
+    INDEX_MAP = {
+        "Nifty 50":        "^NSEI",
+        "Nifty Next 50":   "^NSMIDCP",
+        "Nifty Midcap 150": "^CRSMID",
+        "Nifty Smallcap 250": "^CRSLDX",
+    }
+    TIMEFRAME_MAP = {
+        "1 Day":   {"period": "1d",  "interval": "5m",  "label": "5-min candles"},
+        "1 Month": {"period": "1mo", "interval": "1d",  "label": "Daily candles"},
+        "6 Months":{"period": "6mo", "interval": "1d",  "label": "Daily candles"},
+        "YTD":     {"period": "ytd", "interval": "1d",  "label": "Daily candles"},
+        "1 Year":  {"period": "1y",  "interval": "1wk", "label": "Weekly candles"},
+        "5 Years": {"period": "5y",  "interval": "1mo", "label": "Monthly candles"},
+    }
+
+    col_idx, col_tf = st.columns([2, 2])
+    with col_idx:
+        sel_index = st.selectbox(
+            "Index", list(INDEX_MAP.keys()), key="chart_index"
+        )
+    with col_tf:
+        sel_tf = st.selectbox(
+            "Timeframe", list(TIMEFRAME_MAP.keys()),
+            index=1, key="chart_timeframe"
+        )
+
+    ticker  = INDEX_MAP[sel_index]
+    tf_cfg  = TIMEFRAME_MAP[sel_tf]
+
+    # ── Fetch ─────────────────────────────────────────────────────────
+    @st.cache_data(ttl=300, show_spinner=False)
+    def _fetch_index(ticker: str, period: str, interval: str):
+        try:
+            df = yf.download(ticker, period=period, interval=interval,
+                             auto_adjust=True, progress=False)
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+            df.columns = [str(c).strip() for c in df.columns]
+            return df.dropna()
+        except Exception:
+            return None
+
+    with st.spinner(f"Loading {sel_index} ({sel_tf})…"):
+        df = _fetch_index(ticker, tf_cfg["period"], tf_cfg["interval"])
+
+    if df is None or df.empty:
+        st.error(f"Could not load data for {sel_index}. Yahoo Finance may be temporarily unavailable.")
+        return
+
+    # ── Compute indicators ────────────────────────────────────────────
+    cl = df["Close"].squeeze().astype(float)
+    ma20 = cl.rolling(20).mean()
+    ma50 = cl.rolling(50).mean()
+
+    first_c = float(cl.iloc[0])
+    last_c  = float(cl.iloc[-1])
+    chg_pct = (last_c - first_c) / first_c * 100
+    chg_abs = last_c - first_c
+    hi      = float(df["High"].squeeze().max())
+    lo      = float(df["Low"].squeeze().min())
+
+    chg_col = "#00e5a0" if chg_pct >= 0 else "#ff4560"
+    arrow   = "▲" if chg_pct >= 0 else "▼"
+
+    # ── Metrics bar ───────────────────────────────────────────────────
+    st.markdown(f"""
+    <div style="display:flex;gap:14px;margin-bottom:18px;flex-wrap:wrap">
+      <div style="background:#09090f;border:1px solid #1c1c2e;border-radius:8px;
+                  padding:12px 18px;min-width:130px">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;
+                    letter-spacing:2px;color:#5a5a78;text-transform:uppercase;
+                    margin-bottom:4px">{sel_index}</div>
+        <div style="font-size:22px;font-weight:700;color:#e0e0ff">
+          {last_c:,.2f}
+        </div>
+        <div style="font-size:13px;font-weight:600;color:{chg_col}">
+          {arrow} {chg_abs:+,.2f} ({chg_pct:+.2f}%)
+        </div>
+      </div>
+      <div style="background:#09090f;border:1px solid #1c1c2e;border-radius:8px;
+                  padding:12px 18px;min-width:110px;text-align:center">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;
+                    letter-spacing:2px;color:#5a5a78;text-transform:uppercase;
+                    margin-bottom:4px">Period High</div>
+        <div style="font-size:18px;font-weight:700;color:#00e5a0">{hi:,.2f}</div>
+      </div>
+      <div style="background:#09090f;border:1px solid #1c1c2e;border-radius:8px;
+                  padding:12px 18px;min-width:110px;text-align:center">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;
+                    letter-spacing:2px;color:#5a5a78;text-transform:uppercase;
+                    margin-bottom:4px">Period Low</div>
+        <div style="font-size:18px;font-weight:700;color:#ff4560">{lo:,.2f}</div>
+      </div>
+      <div style="background:#09090f;border:1px solid #1c1c2e;border-radius:8px;
+                  padding:12px 18px;min-width:110px;text-align:center">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;
+                    letter-spacing:2px;color:#5a5a78;text-transform:uppercase;
+                    margin-bottom:4px">Candles</div>
+        <div style="font-size:16px;font-weight:600;color:#e0e0ff">{len(df)}</div>
+        <div style="font-size:10px;color:#5a5a78">{tf_cfg['label']}</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── Candlestick chart ─────────────────────────────────────────────
+    fig = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.04,
+        row_heights=[0.78, 0.22],
+    )
+
+    op = df["Open"].squeeze().astype(float)
+    hi_s = df["High"].squeeze().astype(float)
+    lo_s = df["Low"].squeeze().astype(float)
+
+    # Candlestick
+    fig.add_trace(go.Candlestick(
+        x=df.index,
+        open=op, high=hi_s, low=lo_s, close=cl,
+        name=sel_index,
+        increasing_line_color="#00e5a0",
+        decreasing_line_color="#ff4560",
+        increasing_fillcolor="#00e5a0",
+        decreasing_fillcolor="#ff4560",
+    ), row=1, col=1)
+
+    # MA20
+    if not ma20.isna().all():
+        fig.add_trace(go.Scatter(
+            x=df.index, y=ma20,
+            line=dict(color="#4c8eff", width=1.2),
+            name="MA 20",
+        ), row=1, col=1)
+
+    # MA50
+    if not ma50.isna().all():
+        fig.add_trace(go.Scatter(
+            x=df.index, y=ma50,
+            line=dict(color="#f59e0b", width=1.2, dash="dot"),
+            name="MA 50",
+        ), row=1, col=1)
+
+    # Volume bars
+    vol_s = df.get("Volume", None)
+    if vol_s is not None:
+        vol_s = vol_s.squeeze().astype(float)
+        vol_colors = ["#00e5a0" if c >= o else "#ff4560"
+                      for c, o in zip(cl.values, op.values)]
+        fig.add_trace(go.Bar(
+            x=df.index, y=vol_s,
+            marker_color=vol_colors,
+            opacity=0.6,
+            name="Volume",
+        ), row=2, col=1)
+
+    fig.update_layout(
+        height=520,
+        plot_bgcolor="#05050d",
+        paper_bgcolor="#05050d",
+        font=dict(family="IBM Plex Mono, monospace", color="#8888aa", size=10),
+        xaxis_rangeslider_visible=False,
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.01,
+            xanchor="left", x=0,
+            font=dict(size=10, color="#8888aa"),
+            bgcolor="rgba(0,0,0,0)",
+        ),
+        margin=dict(l=8, r=8, t=10, b=8),
+    )
+    fig.update_xaxes(
+        gridcolor="#111120", showgrid=True,
+        linecolor="#111120", tickfont=dict(size=9),
+    )
+    fig.update_yaxes(
+        gridcolor="#111120", showgrid=True,
+        linecolor="#111120", tickfont=dict(size=9),
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # ── All-4-indices mini-comparison ─────────────────────────────────
+    st.markdown("---")
+    _section("All Indices — Performance Comparison",
+             f"{sel_tf} returns · Refreshed every 5 min")
+
+    mini_cols = st.columns(4)
+    for i, (iname, iticker) in enumerate(INDEX_MAP.items()):
+        with mini_cols[i]:
+            mini_df = _fetch_index(iticker, tf_cfg["period"], "1d")
+            if mini_df is not None and not mini_df.empty:
+                mcl = mini_df["Close"].squeeze().astype(float)
+                mc0 = float(mcl.iloc[0])
+                mcl_last = float(mcl.iloc[-1])
+                mpct = (mcl_last - mc0) / mc0 * 100 if mc0 else 0.0
+                mcolor = "#00e5a0" if mpct >= 0 else "#ff4560"
+                marrow = "▲" if mpct >= 0 else "▼"
+                is_active = "border:1px solid #00e5a0" if iname == sel_index else "border:1px solid #1c1c2e"
+                st.markdown(f"""
+                <div style="background:#09090f;{is_active};border-radius:8px;
+                            padding:12px;text-align:center">
+                  <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;
+                              letter-spacing:1.5px;color:#5a5a78;text-transform:uppercase;
+                              margin-bottom:6px">{iname}</div>
+                  <div style="font-size:16px;font-weight:700;color:#e0e0ff">
+                    {mcl_last:,.0f}
+                  </div>
+                  <div style="font-size:12px;font-weight:600;color:{mcolor}">
+                    {marrow} {mpct:+.2f}%
+                  </div>
+                </div>""", unsafe_allow_html=True)
+            else:
+                st.markdown(f"""
+                <div style="background:#09090f;border:1px solid #1c1c2e;
+                            border-radius:8px;padding:12px;text-align:center">
+                  <div style="font-size:9px;color:#5a5a78">{iname}</div>
+                  <div style="font-size:12px;color:#3a3a52">N/A</div>
+                </div>""", unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  GLOBAL SENTIMENT TAB (called from render_news_tab as a section)
+# ══════════════════════════════════════════════════════════════════════
+
+def render_global_sentiment_section() -> None:
+    """Render global market sentiment section — world + India macro news."""
+    import streamlit as st
+    from backend.sentiment import fetch_global_sentiment
+    from datetime import datetime
+
+    _section("Global Market Sentiment",
+             "Reuters · BBC · CNBC · FT · ET · Moneycontrol · NSE · 30-min cache")
+
+    with st.spinner("Fetching global news feeds…"):
+        g = fetch_global_sentiment()
+
+    mood       = g["mood"]
+    mood_color = g["mood_color"]
+    overall    = g["overall_score"]
+    india_sc   = g["india_score"]
+    world_sc   = g["world_score"]
+    n_art      = g["n_articles"]
+    conf       = g["confidence"]
+    headlines  = g["headlines"]
+    by_source  = g["by_source"]
+
+    # ── Global mood banner ────────────────────────────────────────────
+    conf_pct = int(conf * 10)
+    conf_bar = "█" * conf_pct + "░" * (10 - conf_pct)
+
+    st.markdown(f"""
+    <div style="background:linear-gradient(135deg,rgba(0,0,0,0.6),rgba(0,0,0,0.3));
+                border:1px solid {mood_color}33;border-radius:14px;
+                padding:20px 24px;margin-bottom:20px;
+                border-left:4px solid {mood_color}">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px">
+        <div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;
+                      letter-spacing:3px;color:#5a5a78;text-transform:uppercase;
+                      margin-bottom:6px">Global Market Mood</div>
+          <div style="font-size:28px;font-weight:700;color:{mood_color}">{mood}</div>
+          <div style="font-size:11px;color:#5a5a78;margin-top:4px;
+                      font-family:'IBM Plex Mono',monospace">
+            {conf_bar}  confidence {conf:.0%}
+          </div>
+        </div>
+        <div style="display:flex;gap:28px;flex-wrap:wrap">
+          <div style="text-align:center">
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;
+                        letter-spacing:2px;color:#5a5a78;text-transform:uppercase">Overall</div>
+            <div style="font-size:20px;font-weight:700;
+                        color:{'#00e5a0' if overall>=0 else '#ff4560'}">{overall:+.2f}</div>
+          </div>
+          <div style="text-align:center">
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;
+                        letter-spacing:2px;color:#5a5a78;text-transform:uppercase">India</div>
+            <div style="font-size:20px;font-weight:700;
+                        color:{'#00e5a0' if india_sc>=0 else '#ff4560'}">{india_sc:+.2f}</div>
+          </div>
+          <div style="text-align:center">
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;
+                        letter-spacing:2px;color:#5a5a78;text-transform:uppercase">World</div>
+            <div style="font-size:20px;font-weight:700;
+                        color:{'#00e5a0' if world_sc>=0 else '#ff4560'}">{world_sc:+.2f}</div>
+          </div>
+          <div style="text-align:center">
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;
+                        letter-spacing:2px;color:#5a5a78;text-transform:uppercase">Articles</div>
+            <div style="font-size:20px;font-weight:700;color:#e0e0ff">{n_art}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── By-source breakdown ───────────────────────────────────────────
+    st.markdown("""
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;
+                letter-spacing:3px;color:#3a3a52;text-transform:uppercase;
+                margin-bottom:10px">Sources</div>""", unsafe_allow_html=True)
+
+    src_cols = st.columns(4)
+    for i, (src, info) in enumerate(by_source.items()):
+        sc  = info.get("score", 0.0)
+        n   = info.get("n", 0)
+        err = info.get("error", False)
+        col = "#00e5a0" if sc > 0.05 else "#ff4560" if sc < -0.05 else "#f59e0b"
+        with src_cols[i % 4]:
+            st.markdown(f"""
+            <div style="background:#09090f;border:1px solid #1c1c2e;
+                        border-radius:8px;padding:10px 12px;margin-bottom:8px">
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;
+                          letter-spacing:1px;color:#5a5a78;margin-bottom:3px">{src}</div>
+              {"<div style='font-size:11px;color:#3a3a52'>Unavailable</div>" if err else
+               f"<div style='font-size:14px;font-weight:700;color:{col}'>{sc:+.2f}</div>"
+               f"<div style='font-size:9px;color:#3a3a52'>{n} articles</div>"}
+            </div>""", unsafe_allow_html=True)
+
+    # ── Latest headlines ──────────────────────────────────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("""
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;
+                letter-spacing:3px;color:#3a3a52;text-transform:uppercase;
+                margin-bottom:12px">Latest Headlines</div>""", unsafe_allow_html=True)
+
+    for item in headlines[:15]:
+        title   = item["title"]
+        source  = item["source"]
+        sc      = item["score"]
+        pub_dt  = item.get("pub_dt")
+        is_india = item.get("is_india", False)
+
+        ts_str = ""
+        if pub_dt:
+            try:
+                ts_str = pub_dt.strftime("%d %b · %H:%M UTC")
+            except Exception:
+                pass
+
+        sc_col   = "#00e5a0" if sc > 0 else "#ff4560" if sc < 0 else "#5a5a78"
+        src_badge = f'<span style="background:rgba(0,229,160,0.08);border:1px solid rgba(0,229,160,0.2);border-radius:4px;padding:1px 6px;font-size:8px;color:#00e5a0">India</span>' if is_india else ""
+
+        st.markdown(f"""
+        <div style="background:#09090f;border:1px solid #1c1c2e;border-radius:8px;
+                    padding:10px 14px;margin-bottom:6px;
+                    display:flex;justify-content:space-between;align-items:center">
+          <div style="flex:1">
+            <div style="font-size:12px;color:#c0c0d8;line-height:1.5">{title}</div>
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;
+                        color:#3a3a52;margin-top:3px">
+              {source} {src_badge}
+              {"· " + ts_str if ts_str else ""}
+            </div>
+          </div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;
+                      font-weight:700;color:{sc_col};margin-left:16px;min-width:40px;
+                      text-align:right">{sc:+.1f}</div>
+        </div>
+        """, unsafe_allow_html=True)
