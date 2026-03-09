@@ -218,6 +218,69 @@ def test_no_raw_html_in_card_body_st_markdown():
                 f"nse-card-body block is not self-contained:\n  Opens: {sorted(opens)}\n  Closes: {sorted(closes)}"
             )
 
+
+def test_uses_components_html():
+    """Shell must use components.v1.html — the only reliable way to render HTML on Streamlit Cloud."""
+    expect("components.html" in src, "Must use st.components.v1.html() for the card shell")
+    expect("import streamlit.components.v1" in src or "components.v1" in src,
+           "Must import streamlit.components.v1")
+
+def test_no_markdown_with_open_divs_before_widgets():
+    """After the fix, no st.markdown block should open a div that's left unclosed."""
+    problems = []
+    lines = src.split('\n')
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        # Only single-line markdown calls
+        if 'st.markdown(' in stripped and 'unsafe_allow_html=True' in stripped:
+            opens, closes = count_tags(stripped)
+            if opens.count("div") > closes.count("div"):
+                j = i + 1
+                while j < len(lines) and (not lines[j].strip() or lines[j].strip().startswith('#')):
+                    j += 1
+                if j < len(lines):
+                    next_ln = lines[j].strip()
+                    widgets = ['st.text_input','st.button','st.selectbox','st.columns','st.spinner']
+                    if any(w in next_ln for w in widgets):
+                        problems.append(f"Line {i+1}: unclosed div before widget at line {j+1}")
+    expect(not problems, "Open div before widget:\n  " + "\n  ".join(problems))
+
+def test_reset_has_redirect_to():
+    auth_src = (ROOT / "backend/auth.py").read_text()
+    expect("redirect_to" in auth_src, "reset_password_email must pass redirect_to param")
+    expect("app" in auth_src and "url" in auth_src,
+           "Must read app URL from st.secrets['app']['url']")
+
+def test_shell_html_self_contained():
+    """_shell_html() must return complete HTML5 document."""
+    expect("def _shell_html" in src, "_shell_html function must exist")
+    expect("<!DOCTYPE html>" in src, "Shell must be a full HTML document")
+    expect("</html>" in src, "Shell must close </html>")
+
+def test_switchers_no_html_wrappers():
+    """Switcher buttons must NOT be wrapped in st.markdown div blocks."""
+    lines = src.split('\n')
+    in_switchers = False
+    open_div_before_button = False
+    for i, line in enumerate(lines):
+        if 'def _switchers' in line:
+            in_switchers = True
+        if in_switchers and 'def _render' in line:
+            break
+        if in_switchers:
+            stripped = line.strip()
+            if 'st.markdown' in stripped and '<div' in stripped and 'unsafe_allow_html=True' in stripped:
+                open_div_before_button = True
+    expect(not open_div_before_button,
+           "_switchers() must not wrap st.button calls in st.markdown div blocks")
+
+test("ARCH     — uses components.v1.html for shell",             test_uses_components_html)
+test("HTML     — no open div before widget (post-fix verify)",   test_no_markdown_with_open_divs_before_widgets)
+test("AUTH     — reset email passes redirect_to param",          test_reset_has_redirect_to)
+test("AUTH     — shell_html returns full HTML document",         test_shell_html_self_contained)
+test("HTML     — switcher buttons have no div wrappers",         test_switchers_no_html_wrappers)
+
+
 # ── Register tests ────────────────────────────────────────────────────────────
 test("SYNTAX   — auth_page.py parses cleanly",                  test_syntax)
 test("IMPORT   — request_password_reset imported",              test_imports_request_password_reset)
