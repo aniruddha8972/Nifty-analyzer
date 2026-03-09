@@ -313,7 +313,7 @@ def _render_otp_verify(sb_mode: bool):
       <div class="otp-step-icon">📨</div>
       <div class="otp-step-title">Check your email</div>
       <div class="otp-step-sub">
-        We sent a 6-digit code to<br>
+        We sent a one-time code to<br>
         <span class="otp-email-highlight">{email}</span>
       </div>
     </div>""", unsafe_allow_html=True)
@@ -328,17 +328,17 @@ def _render_otp_verify(sb_mode: bool):
         </div>""", unsafe_allow_html=True)
 
     code = st.text_input(
-        "Enter 6-digit code",
-        placeholder="• • • • • •",
-        max_chars=6,
+        "Enter OTP code from email",
+        placeholder="Enter code",
+        max_chars=8,
         key="otp_code_input",
     )
 
     st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
 
     if st.button("✓  Verify Code", type="primary", use_container_width=True, key="otp_verify_btn"):
-        if not code or len(code) != 6 or not code.isdigit():
-            st.error("⚠ Enter the 6-digit number from your email.")
+        if not code or not (6 <= len(code) <= 8) or not code.isdigit():
+            st.error("⚠ Enter the code from your email (6–8 digits).")
         else:
             with st.spinner("Verifying…"):
                 ok, msg, user_info = verify_otp(email, code)
