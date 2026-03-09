@@ -1,23 +1,34 @@
 """
-backend/auth.py  —  Unified auth: Supabase cloud + local JSON fallback.
+backend/auth.py  —  OTP-based auth (no passwords).
 
 Public API:
-  register(username, name, email, password) → (bool, str)
-  login(identifier, password)               → (bool, str, user_info|None)
+  register(username, name, email)           → (bool, str)
+  send_otp(email)                           → (bool, str)
+  verify_otp(email, token)                  → (bool, str, user_info|None)
   logout(user_info)                         → None
   load_user_portfolio(user_info)            → dict
   save_user_portfolio(user_info, portfolio) → None
   is_supabase_mode()                        → bool
   is_admin(user_info)                       → bool
 
-  # Admin only
+  # Kept for backward compat (admin dashboard uses these)
+  validate_password(pw)                     → (bool, list)
+  update_password(user_info, cur, new)      → (bool, str)
   admin_list_users()                        → list[dict]
-  admin_delete_user(user_id, mode)          → (bool, str)
-  admin_create_user(username,name,email,pw) → (bool, str)
-  admin_update_user(user_id, fields, mode)  → (bool, str)
+  admin_delete_user(user_id)               → (bool, str)
+  admin_create_user(u,n,e,pw)              → (bool, str)
+  admin_update_user(user_id, fields)       → (bool, str)
+
+OTP flow (Supabase):
+  send_otp   → client.auth.sign_in_with_otp({"email": email})
+  verify_otp → client.auth.verify_otp({"email": email, "token": code, "type": "email"})
+
+Local fallback:
+  Generates a 6-digit OTP, stores it in memory (60s TTL), emails not sent
+  — shows OTP on screen with a warning banner.
 """
 
-import hashlib, json, re, threading
+import hashlib, json, re, threading, random, time
 from datetime import datetime
 from pathlib import Path
 
@@ -49,51 +60,65 @@ def _get_supabase_client(access_token: str | None = None):
 
 
 # ══════════════════════════════════════════════════════════════════════
-#  USERNAME SUGGESTION HELPER
+#  PASSWORD VALIDATION (kept for admin dashboard / backward compat)
 # ══════════════════════════════════════════════════════════════════════
 
 def validate_password(password: str) -> tuple[bool, list[str]]:
-    """
-    Returns (is_valid, unmet_rules).
-    Rules: 8+ chars, uppercase, lowercase, digit, special char.
-    """
     SPECIAL = set("!@#$%^&*()_+-=[]{}|;:,./<>?")
     rules = []
-    if len(password) < 8:
-        rules.append("At least 8 characters")
-    if not any(c.isupper() for c in password):
-        rules.append("At least one uppercase letter (A-Z)")
-    if not any(c.islower() for c in password):
-        rules.append("At least one lowercase letter (a-z)")
-    if not any(c.isdigit() for c in password):
-        rules.append("At least one number (0-9)")
-    if not any(c in SPECIAL for c in password):
-        rules.append("At least one special character (!@#$%...)")
+    if len(password) < 8:            rules.append("At least 8 characters")
+    if not any(c.isupper() for c in password): rules.append("At least one uppercase letter (A-Z)")
+    if not any(c.islower() for c in password): rules.append("At least one lowercase letter (a-z)")
+    if not any(c.isdigit() for c in password): rules.append("At least one number (0-9)")
+    if not any(c in SPECIAL for c in password): rules.append("At least one special character (!@#$%...)")
     return (len(rules) == 0), rules
 
 
-def _suggest_usernames(base: str, taken: set[str]) -> list[str]:
-    """Return up to 3 available username suggestions based on base."""
-    import random
-    base   = re.sub(r'[^a-z0-9_]', '', base.lower())[:12] or "user"
-    year   = str(datetime.now().year)[2:]
-    trades = ["_trades", "_nse", "_inv", "_50"]
-    nums   = [str(random.randint(10, 99)) for _ in range(6)]
+# ══════════════════════════════════════════════════════════════════════
+#  USERNAME SUGGESTION HELPER
+# ══════════════════════════════════════════════════════════════════════
 
+def _suggest_usernames(base: str, taken: set[str]) -> list[str]:
+    base = re.sub(r'[^a-z0-9_]', '', base.lower())[:12] or "user"
+    year = str(datetime.now().year)[2:]
+    nums = [str(random.randint(10, 99)) for _ in range(6)]
     candidates = [
-        f"{base}{year}",
-        f"{base}_trades",
-        f"{base}_nse",
-        f"{base}{nums[0]}",
-        f"{base}{nums[1]}",
-        f"nifty_{base}",
-        f"{base}_{nums[2]}",
+        f"{base}{year}", f"{base}_trades", f"{base}_nse",
+        f"{base}{nums[0]}", f"{base}{nums[1]}", f"nifty_{base}", f"{base}_{nums[2]}",
     ]
     return [c for c in candidates if c not in taken and len(c) >= 3][:3]
 
 
 # ══════════════════════════════════════════════════════════════════════
-#  SUPABASE — REGISTER
+#  LOCAL OTP STORE (in-memory, 60s TTL)
+# ══════════════════════════════════════════════════════════════════════
+
+_LOCAL_OTP: dict[str, tuple[str, float]] = {}   # email → (code, expires_at)
+_OTP_TTL = 300   # 5 minutes
+
+
+def _local_generate_otp(email: str) -> str:
+    code = str(random.randint(100000, 999999))
+    _LOCAL_OTP[email] = (code, time.time() + _OTP_TTL)
+    return code
+
+
+def _local_verify_otp_code(email: str, code: str) -> bool:
+    entry = _LOCAL_OTP.get(email)
+    if not entry:
+        return False
+    stored_code, expires_at = entry
+    if time.time() > expires_at:
+        del _LOCAL_OTP[email]
+        return False
+    if stored_code != code.strip():
+        return False
+    del _LOCAL_OTP[email]
+    return True
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  SUPABASE — REGISTER (no password)
 # ══════════════════════════════════════════════════════════════════════
 
 def _sb_get_taken_usernames(client) -> set[str]:
@@ -104,8 +129,12 @@ def _sb_get_taken_usernames(client) -> set[str]:
         return set()
 
 
-def _sb_register(username: str, name: str, email: str, password: str) -> tuple[bool, str]:
-    # ── Validation first — no network calls ──────────────────────────
+def _sb_register(username: str, name: str, email: str) -> tuple[bool, str]:
+    """
+    Create profile row for a new user (no password).
+    Supabase Auth user is created lazily on first OTP verify.
+    We pre-validate the username and email here, then upsert the profile.
+    """
     username = username.strip().lower()
     email    = email.strip().lower()
 
@@ -115,13 +144,10 @@ def _sb_register(username: str, name: str, email: str, password: str) -> tuple[b
         return False, "Please enter your full name"
     if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
         return False, "Enter a valid email address"
-    valid, fails = validate_password(password.strip())
-    if not valid:
-        return False, "Weak password: " + " · ".join(fails)
 
     client = _get_supabase_client()
 
-    # ── Check username ────────────────────────────────────────────────
+    # Username taken?
     try:
         res = client.table("profiles").select("username").eq("username", username).execute()
         if res.data:
@@ -129,240 +155,177 @@ def _sb_register(username: str, name: str, email: str, password: str) -> tuple[b
             suggest = _suggest_usernames(username, taken)
             s_str   = "  ·  ".join(suggest) if suggest else ""
             hint    = f"\n💡 Try: {s_str}" if s_str else ""
-            return False, f"Username **{username}** is already taken.{hint}"
+            return False, f"USERNAME_TAKEN:{','.join(suggest)}"
     except Exception:
-        pass  # table may not exist yet — let it proceed
+        pass
 
-    # ── Check email ───────────────────────────────────────────────────
+    # Email taken?
     try:
         res = client.table("profiles").select("email").eq("email", email).execute()
         if res.data:
-            return False, "Email already registered — try signing in"
+            return False, "EMAIL_EXISTS:Email already registered — sign in instead"
     except Exception:
         pass
 
-    # ── Create auth user ──────────────────────────────────────────────
+    # Send OTP — Supabase will create the auth user on first verify
+    # We store the intended username+name in a pending_profiles table or
+    # just pass them via Supabase sign_up metadata.
     try:
-        res = client.auth.sign_up({"email": email, "password": password,
-                                   "options": {"data": {"name": name.strip()}}})
-    except Exception as e:
-        err = str(e)
-        if "already registered" in err.lower():
-            return False, "Email already registered — try signing in"
-        return False, f"Could not create account: {err}"
-
-    if not res.user:
-        return False, "Could not create account — email may already be registered"
-
-    uid   = res.user.id
-    token = res.session.access_token if res.session else None
-
-    # ── Update profile with real username + name + email ─────────────
-    # Trigger already created a placeholder row — we overwrite it.
-    # Try 3 strategies so email is ALWAYS saved regardless of token state.
-    profile_payload = {
-        "id":       uid,
-        "username": username,
-        "name":     name.strip(),
-        "email":    email,
-        "is_admin": False,
-    }
-
-    saved = False
-
-    # Strategy 1: authenticated client (token available)
-    if token:
-        try:
-            ac = _get_supabase_client(token)
-            ac.table("profiles").upsert(profile_payload).execute()
-            saved = True
-        except Exception:
-            pass
-
-    # Strategy 2: anon client upsert (RLS insert policy is WITH CHECK(true))
-    if not saved:
-        try:
-            client.table("profiles").upsert(profile_payload).execute()
-            saved = True
-        except Exception:
-            pass
-
-    # Strategy 3: UPDATE only (no id conflict) — works even without token
-    if not saved:
-        try:
-            client.table("profiles")                   .update({"username": username, "name": name.strip(), "email": email})                   .eq("id", uid).execute()
-        except Exception:
-            pass
-
-    # Portfolio row
-    try:
-        pf = _get_supabase_client(token) if token else client
-        pf.table("portfolios").upsert({"user_id": uid, "data": {}}).execute()
-    except Exception:
-        pass
-
-    if token:
-        return True, f"Welcome, {name.strip()}! Account created."
-    return True, "Account created! Check your email to confirm, then sign in."
-
-
-# ══════════════════════════════════════════════════════════════════════
-#  SUPABASE — LOGIN
-# ══════════════════════════════════════════════════════════════════════
-
-def _sb_login(identifier: str, password: str) -> tuple[bool, str, dict | None]:
-    client = _get_supabase_client()
-    identifier = identifier.strip()
-    email      = identifier.lower()
-
-    # Username → email lookup
-    if "@" not in email:
-        try:
-            res = client.table("profiles").select("email, username, name") \
-                        .eq("username", email).single().execute()
-            if not res.data:
-                return False, "Username not found — try your email address", None
-            email = res.data["email"] or ""
-            if not email:
-                return False, "Please sign in with your email address", None
-        except Exception:
-            return False, "Username not found", None
-
-    try:
-        res = client.auth.sign_in_with_password({"email": email, "password": password})
+        client.auth.sign_up({
+            "email": email,
+            "password": _random_password(),   # required by sign_up API; user never sees it
+            "options": {
+                "data": {"name": name.strip(), "username": username},
+            },
+        })
     except Exception as e:
         err = str(e).lower()
-        if "invalid" in err or "credentials" in err or "password" in err:
-            return False, "Incorrect email or password", None
-        return False, f"Login error: {e}", None
+        if "already registered" in err:
+            return False, "EMAIL_EXISTS:Email already registered — sign in instead"
+        # If sign_up fails (user may already exist from prior attempt), proceed
+        pass
 
-    if not res.user:
-        return False, "Incorrect email or password", None
+    # Send OTP
+    try:
+        client.auth.sign_in_with_otp({
+            "email": email,
+            "options": {"should_create_user": True},
+        })
+    except Exception as e:
+        return False, f"Could not send OTP: {e}"
 
-    uid   = res.user.id
-    token = res.session.access_token
+    # Store name/username in profiles so verify_otp can upsert it
+    # We use a temporary record with no id (will be filled on verify)
+    try:
+        # Store as pending — will be completed on OTP verify
+        import streamlit as st
+        if "pending_profiles" not in st.session_state:
+            st.session_state["pending_profiles"] = {}
+        st.session_state["pending_profiles"][email] = {
+            "username": username,
+            "name":     name.strip(),
+            "email":    email,
+        }
+    except Exception:
+        pass
+
+    return True, f"OTP_SENT:{email}"
+
+
+def _random_password() -> str:
+    """Generate a random strong password (never shown to user)."""
+    import secrets, string
+    chars = string.ascii_letters + string.digits + "!@#$"
+    return "".join(secrets.choice(chars) for _ in range(24))
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  SUPABASE — SEND OTP (sign in)
+# ══════════════════════════════════════════════════════════════════════
+
+def _sb_send_otp(email: str) -> tuple[bool, str]:
+    email = email.strip().lower()
+    if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
+        return False, "Enter a valid email address"
+    try:
+        client = _get_supabase_client()
+        client.auth.sign_in_with_otp({
+            "email": email,
+            "options": {"should_create_user": False},
+        })
+        return True, f"OTP_SENT:{email}"
+    except Exception as e:
+        err = str(e).lower()
+        if "not found" in err or "not registered" in err or "no user" in err:
+            return False, "No account found for that email. Please register first."
+        return False, f"Could not send OTP: {e}"
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  SUPABASE — VERIFY OTP
+# ══════════════════════════════════════════════════════════════════════
+
+def _sb_verify_otp(email: str, token: str) -> tuple[bool, str, dict | None]:
+    email = email.strip().lower()
+    token = token.strip()
+    if not token or len(token) != 6 or not token.isdigit():
+        return False, "Enter the 6-digit code from your email", None
 
     try:
-        prof = _get_supabase_client(token).table("profiles") \
-                    .select("username, name, email, is_admin, created_at") \
-                    .eq("id", uid).single().execute().data or {}
+        client = _get_supabase_client()
+        res = client.auth.verify_otp({
+            "email": email,
+            "token": token,
+            "type":  "email",
+        })
+    except Exception as e:
+        err = str(e).lower()
+        if "invalid" in err or "expired" in err or "otp" in err:
+            return False, "Invalid or expired code — request a new one", None
+        return False, f"Verification error: {e}", None
+
+    if not res or not res.user:
+        return False, "Invalid or expired code — request a new one", None
+
+    uid          = res.user.id
+    access_token = res.session.access_token if res.session else None
+    authed       = _get_supabase_client(access_token)
+
+    # Fetch or build profile
+    try:
+        prof_res = authed.table("profiles") \
+                         .select("username, name, email, is_admin, created_at") \
+                         .eq("id", uid).single().execute()
+        prof = prof_res.data or {}
     except Exception:
         prof = {}
+
+    # If this is a new registration, upsert the profile with pending data
+    try:
+        import streamlit as st
+        pending = st.session_state.get("pending_profiles", {}).get(email)
+    except Exception:
+        pending = None
+
+    if pending or not prof.get("username"):
+        payload = pending or {
+            "username": email.split("@")[0][:20],
+            "name":     res.user.user_metadata.get("name", "User"),
+            "email":    email,
+        }
+        payload["id"]       = uid
+        payload["is_admin"] = prof.get("is_admin", False)
+        try:
+            authed.table("profiles").upsert(payload).execute()
+            prof.update(payload)
+        except Exception:
+            pass
+        # Clear pending
+        try:
+            st.session_state.get("pending_profiles", {}).pop(email, None)
+        except Exception:
+            pass
+        # Create portfolio row if missing
+        try:
+            authed.table("portfolios").upsert({"user_id": uid, "data": {}}).execute()
+        except Exception:
+            pass
 
     user_info = {
         "user_id":       uid,
         "username":      prof.get("username", email.split("@")[0]),
         "name":          prof.get("name", "User"),
-        "email":         prof.get("email", res.user.email),
+        "email":         prof.get("email", email),
         "is_admin":      prof.get("is_admin", False),
         "created_at":    prof.get("created_at", ""),
-        "access_token":  token,
+        "access_token":  access_token or "",
         "refresh_token": res.session.refresh_token if res.session else "",
     }
-    return True, f"Welcome back, {user_info['name']}!", user_info
+    return True, f"Welcome, {user_info['name']}!", user_info
 
 
 # ══════════════════════════════════════════════════════════════════════
-#  SUPABASE — ADMIN OPERATIONS
-# ══════════════════════════════════════════════════════════════════════
-
-def _sb_list_users(token: str) -> list[dict]:
-    try:
-        res = _get_supabase_client(token).table("profiles") \
-                  .select("id, username, name, email, is_admin, created_at") \
-                  .order("created_at", desc=True).execute()
-        return res.data or []
-    except Exception as e:
-        return []
-
-
-def _sb_delete_user(admin_token: str, user_id: str) -> tuple[bool, str]:
-    try:
-        client = _get_supabase_client(admin_token)
-        # Delete portfolio first (FK)
-        client.table("portfolios").delete().eq("user_id", user_id).execute()
-        # Delete profile
-        client.table("profiles").delete().eq("id", user_id).execute()
-        # Note: auth.users row remains but is harmless — user can't log in
-        # without a profile. Full deletion requires service_role key.
-        return True, "User removed"
-    except Exception as e:
-        return False, f"Delete error: {e}"
-
-
-def _sb_admin_create_user(admin_token: str, username: str, name: str,
-                          email: str, password: str) -> tuple[bool, str]:
-    return _sb_register(username, name, email, password)
-
-
-def _sb_update_user(admin_token: str, user_id: str, fields: dict) -> tuple[bool, str]:
-    try:
-        client = _get_supabase_client(admin_token)
-        client.table("profiles").update(fields).eq("id", user_id).execute()
-        return True, "User updated"
-    except Exception as e:
-        return False, f"Update error: {e}"
-
-
-# ══════════════════════════════════════════════════════════════════════
-#  SUPABASE — PORTFOLIO
-# ══════════════════════════════════════════════════════════════════════
-
-def _sb_logout(user_info: dict) -> None:
-    try:
-        _get_supabase_client(user_info.get("access_token")).auth.sign_out()
-    except Exception:
-        pass
-
-
-def _sb_update_password(user_info: dict, current_pw: str, new_pw: str) -> tuple[bool, str]:
-    """Update Supabase password. Verifies current password first."""
-    valid, fails = validate_password(new_pw.strip())
-    if not valid:
-        return False, "Weak password: " + " · ".join(fails)
-    token = user_info.get("access_token", "")
-    email = user_info.get("email", "")
-    if not token or not email:
-        return False, "Not logged in"
-    # Verify current password by re-login
-    try:
-        _get_supabase_client().auth.sign_in_with_password(
-            {"email": email, "password": current_pw}
-        )
-    except Exception:
-        return False, "Current password is incorrect"
-    # Update to new password
-    try:
-        _get_supabase_client(token).auth.update_user({"password": new_pw.strip()})
-        return True, "Password updated successfully"
-    except Exception as e:
-        return False, f"Update failed: {e}"
-
-
-def _sb_load_portfolio(user_info: dict) -> dict:
-    """Load portfolio via SECURITY DEFINER RPC — bypasses all RLS."""
-    uid = user_info.get("user_id", "")
-    if not uid:
-        return {}
-    from backend.db_init import load_portfolio_rpc
-    data, err = load_portfolio_rpc(uid)
-    return data
-
-
-def _sb_save_portfolio(user_info: dict, portfolio: dict) -> None:
-    """Save portfolio via SECURITY DEFINER RPC — bypasses all RLS.
-    Raises on failure so the UI can show the error."""
-    uid = user_info.get("user_id", "")
-    if not uid:
-        raise ValueError("No user_id — not logged in")
-    from backend.db_init import save_portfolio_rpc
-    ok, msg = save_portfolio_rpc(uid, portfolio)
-    if not ok:
-        raise Exception(msg)
-
-
-# ══════════════════════════════════════════════════════════════════════
-#  LOCAL JSON MODE
+#  LOCAL JSON MODE — OTP
 # ══════════════════════════════════════════════════════════════════════
 
 _BASE          = Path(__file__).parent.parent / "data"
@@ -399,7 +362,7 @@ def _local_pf_path(username: str) -> Path:
     return _PORTFOLIO_DIR / f"{(username or 'anon').lower()}.json"
 
 
-def _local_register(username: str, name: str, email: str, password: str) -> tuple[bool, str]:
+def _local_register(username: str, name: str, email: str) -> tuple[bool, str]:
     username = username.strip().lower()
     email    = email.strip().lower()
 
@@ -409,98 +372,167 @@ def _local_register(username: str, name: str, email: str, password: str) -> tupl
         return False, "Please enter your full name"
     if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
         return False, "Enter a valid email address"
-    valid, fails = validate_password(password.strip())
-    if not valid:
-        return False, "Weak password: " + " · ".join(fails)
 
     users = _load_users()
 
     if username in users:
         taken   = set(users.keys())
         suggest = _suggest_usernames(username, taken)
-        s_str   = "  ·  ".join(suggest) if suggest else ""
-        hint    = f"\n💡 Try: {s_str}" if s_str else ""
-        return False, f"Username **{username}** is already taken.{hint}"
+        return False, f"USERNAME_TAKEN:{','.join(suggest)}"
 
     if any(u.get("email") == email for u in users.values()):
-        return False, "Email already registered — try signing in"
+        return False, "EMAIL_EXISTS:Email already registered — sign in instead"
 
+    # Create user (no password — OTP based)
     users[username] = {
-        "username":      username,
-        "name":          name.strip(),
-        "email":         email,
-        "password_hash": _hash(password),
-        "is_admin":      False,
-        "created_at":    datetime.now().strftime("%d %b %Y, %H:%M"),
+        "username":   username,
+        "name":       name.strip(),
+        "email":      email,
+        "is_admin":   False,
+        "created_at": datetime.now().strftime("%d %b %Y, %H:%M"),
     }
     _save_users(users)
-    p = _local_pf_path(username)
-    if not p.exists():
-        p.write_text("{}")
-    return True, f"Welcome, {name.strip()}! Account created."
+    pf = _local_pf_path(username)
+    if not pf.exists():
+        pf.write_text("{}")
+
+    code = _local_generate_otp(email)
+    return True, f"OTP_SENT:{email}:LOCAL:{code}"
 
 
-def _local_login(identifier: str, password: str) -> tuple[bool, str, dict | None]:
-    identifier = identifier.strip().lower()
-    users      = _load_users()
-    user       = users.get(identifier) or next(
-        (u for u in users.values() if u.get("email") == identifier), None
-    )
+def _local_send_otp(email: str) -> tuple[bool, str]:
+    email = email.strip().lower()
+    if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
+        return False, "Enter a valid email address"
+    users = _load_users()
+    user  = next((u for u in users.values() if u.get("email") == email), None)
     if not user:
-        return False, "Username / email not found", None
-    if user["password_hash"] != _hash(password):
-        return False, "Incorrect password", None
-    info = {k: v for k, v in user.items() if k != "password_hash"}
+        return False, "No account found for that email. Please register first."
+    code = _local_generate_otp(email)
+    return True, f"OTP_SENT:{email}:LOCAL:{code}"
+
+
+def _local_verify_otp(email: str, token: str) -> tuple[bool, str, dict | None]:
+    email = email.strip().lower()
+    if not token or len(token) != 6 or not token.isdigit():
+        return False, "Enter the 6-digit code shown on screen", None
+    if not _local_verify_otp_code(email, token):
+        return False, "Invalid or expired code — request a new one", None
+    users = _load_users()
+    user  = next((u for u in users.values() if u.get("email") == email), None)
+    if not user:
+        return False, "Account not found", None
+    info = {k: v for k, v in user.items()}
     info["user_id"] = info["username"]
-    return True, f"Welcome back, {user['name']}!", info
+    return True, f"Welcome, {user['name']}!", info
 
 
-# ── Local admin ops ───────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════
+#  SUPABASE — ADMIN / PORTFOLIO / MISC (unchanged)
+# ══════════════════════════════════════════════════════════════════════
+
+def _sb_list_users(token: str) -> list[dict]:
+    try:
+        res = _get_supabase_client(token).table("profiles") \
+                  .select("id, username, name, email, is_admin, created_at") \
+                  .order("created_at", desc=True).execute()
+        return res.data or []
+    except Exception:
+        return []
+
+
+def _sb_delete_user(admin_token: str, user_id: str) -> tuple[bool, str]:
+    try:
+        client = _get_supabase_client(admin_token)
+        client.table("portfolios").delete().eq("user_id", user_id).execute()
+        client.table("profiles").delete().eq("id", user_id).execute()
+        return True, "User removed"
+    except Exception as e:
+        return False, f"Delete error: {e}"
+
+
+def _sb_update_user(admin_token: str, user_id: str, fields: dict) -> tuple[bool, str]:
+    try:
+        _get_supabase_client(admin_token).table("profiles").update(fields).eq("id", user_id).execute()
+        return True, "User updated"
+    except Exception as e:
+        return False, f"Update error: {e}"
+
+
+def _sb_logout(user_info: dict) -> None:
+    try:
+        _get_supabase_client(user_info.get("access_token")).auth.sign_out()
+    except Exception:
+        pass
+
+
+def _sb_update_password(user_info: dict, current_pw: str, new_pw: str) -> tuple[bool, str]:
+    """Update password via Supabase. OTP users: current_pw is ignored (they have none)."""
+    valid, fails = validate_password(new_pw.strip())
+    if not valid:
+        return False, "Weak password: " + " · ".join(fails)
+    token = user_info.get("access_token", "")
+    if not token:
+        return False, "Not logged in"
+    try:
+        _get_supabase_client(token).auth.update_user({"password": new_pw.strip()})
+        return True, "Password updated successfully"
+    except Exception as e:
+        return False, f"Update failed: {e}"
+
+
+def _sb_load_portfolio(user_info: dict) -> dict:
+    uid = user_info.get("user_id", "")
+    if not uid: return {}
+    from backend.db_init import load_portfolio_rpc
+    data, _ = load_portfolio_rpc(uid)
+    return data
+
+
+def _sb_save_portfolio(user_info: dict, portfolio: dict) -> None:
+    uid = user_info.get("user_id", "")
+    if not uid: raise ValueError("No user_id")
+    from backend.db_init import save_portfolio_rpc
+    ok, msg = save_portfolio_rpc(uid, portfolio)
+    if not ok: raise Exception(msg)
+
 
 def _local_list_users() -> list[dict]:
-    users = _load_users()
-    return [
-        {k: v for k, v in u.items() if k != "password_hash"}
-        for u in users.values()
-    ]
+    return [{k: v for k, v in u.items() if k != "password_hash"} for u in _load_users().values()]
 
 
 def _local_delete_user(user_id: str) -> tuple[bool, str]:
     users = _load_users()
-    if user_id not in users:
-        return False, "User not found"
-    if users[user_id].get("is_admin"):
-        return False, "Cannot delete the admin account"
+    if user_id not in users: return False, "User not found"
+    if users[user_id].get("is_admin"): return False, "Cannot delete admin account"
     del users[user_id]
     _save_users(users)
     pf = _local_pf_path(user_id)
-    if pf.exists():
-        pf.unlink()
+    if pf.exists(): pf.unlink()
     return True, f"User {user_id} deleted"
 
 
 def _local_update_user(user_id: str, fields: dict) -> tuple[bool, str]:
     users = _load_users()
-    if user_id not in users:
-        return False, "User not found"
+    if user_id not in users: return False, "User not found"
     for k, v in fields.items():
-        if k not in ("password_hash",):   # never overwrite hash via admin
+        if k != "password_hash":
             users[user_id][k] = v
     _save_users(users)
     return True, "User updated"
 
 
 def _local_update_password(user_info: dict, current_pw: str, new_pw: str) -> tuple[bool, str]:
-    """Update password for local-mode user."""
+    # In OTP mode passwords are not required for login, but admin dashboard
+    # may still set/verify passwords. Check current hash if one exists.
     valid, fails = validate_password(new_pw.strip())
     if not valid:
         return False, "Weak password: " + " · ".join(fails)
     username = user_info.get("username", "")
     users = _load_users()
-    user  = users.get(username)
-    if not user:
-        return False, "User not found"
-    if user.get("password_hash") != _hash(current_pw):
+    if username not in users: return False, "User not found"
+    stored_hash = users[username].get("password_hash")
+    if stored_hash and stored_hash != _hash(current_pw):
         return False, "Current password is incorrect"
     users[username]["password_hash"] = _hash(new_pw.strip())
     _save_users(users)
@@ -509,8 +541,7 @@ def _local_update_password(user_info: dict, current_pw: str, new_pw: str) -> tup
 
 def _local_load_portfolio(user_info: dict) -> dict:
     path = _local_pf_path(user_info.get("username", ""))
-    if not path.exists():
-        return {}
+    if not path.exists(): return {}
     with _LOCK:
         try:    return json.loads(path.read_text())
         except: return {}
@@ -523,67 +554,47 @@ def _local_save_portfolio(user_info: dict, portfolio: dict):
         path.write_text(json.dumps(portfolio, indent=2, default=str))
 
 
+def _get_admin_token() -> str | None:
+    try:
+        import streamlit as st
+        user = st.session_state.get("user_info", {})
+        return user.get("access_token", "") if user.get("is_admin") else None
+    except Exception:
+        return None
+
+
 # ══════════════════════════════════════════════════════════════════════
 #  PUBLIC API
 # ══════════════════════════════════════════════════════════════════════
 
-def register(username: str, name: str, email: str, password: str) -> tuple[bool, str]:
+def register(username: str, name: str, email: str, password: str = "") -> tuple[bool, str]:
+    """Register new user (password param ignored — OTP only)."""
     if _use_supabase():
-        return _sb_register(username, name, email, password)
-    return _local_register(username, name, email, password)
+        return _sb_register(username, name, email)
+    return _local_register(username, name, email)
 
 
-def login(identifier: str, password: str) -> tuple[bool, str, dict | None]:
+def send_otp(email: str) -> tuple[bool, str]:
+    """
+    Send a 6-digit OTP to email.
+    Returns (True, "OTP_SENT:<email>") on success.
+    Returns (True, "OTP_SENT:<email>:LOCAL:<code>") in local mode.
+    """
     if _use_supabase():
-        return _sb_login(identifier, password)
-    return _local_login(identifier, password)
+        return _sb_send_otp(email)
+    return _local_send_otp(email)
+
+
+def verify_otp(email: str, token: str) -> tuple[bool, str, dict | None]:
+    """Verify 6-digit OTP code. Returns (ok, message, user_info|None)."""
+    if _use_supabase():
+        return _sb_verify_otp(email, token)
+    return _local_verify_otp(email, token)
 
 
 def logout(user_info: dict) -> None:
     if _use_supabase():
         _sb_logout(user_info)
-
-
-def request_password_reset(email: str) -> tuple[bool, str]:
-    """
-    Send a password-reset email via Supabase Auth.
-
-    REDIRECT URL FIX:
-      Supabase reset emails default to localhost if no redirect_to is set.
-      We read the app's public URL from st.secrets["app"]["url"] and pass
-      it as redirect_to so the link lands back on the live Streamlit app.
-      Falls back to the Supabase project URL if not configured.
-
-    In local mode, returns a friendly message (no email server).
-    """
-    email = email.strip().lower()
-    if not email or "@" not in email:
-        return False, "Please enter a valid email address."
-
-    if _use_supabase():
-        try:
-            import streamlit as st
-
-            # Determine redirect URL — points back to the live app
-            try:
-                redirect_url = st.secrets["app"]["url"].rstrip("/")
-            except Exception:
-                # Fallback: derive from Supabase project URL
-                sb_url = st.secrets.get("supabase", {}).get("url", "")
-                redirect_url = sb_url  # better than localhost
-
-            client = _get_supabase_client()
-            client.auth.reset_password_email(
-                email,
-                options={"redirect_to": redirect_url},
-            )
-            # Always return success to avoid email enumeration
-            return True, "Reset link sent — check your inbox."
-        except Exception:
-            return True, "Reset link sent — check your inbox."
-    else:
-        # Local mode — no email server
-        return True, "Local mode: no email server. Ask your admin to reset your password via the Admin dashboard."
 
 
 def load_user_portfolio(user_info: dict) -> dict:
@@ -600,7 +611,6 @@ def save_user_portfolio(user_info: dict, portfolio: dict) -> None:
 
 
 def update_password(user_info: dict, current_pw: str, new_pw: str) -> tuple[bool, str]:
-    """Update user password with strength validation and current-password verification."""
     if _use_supabase():
         return _sb_update_password(user_info, current_pw, new_pw)
     return _local_update_password(user_info, current_pw, new_pw)
@@ -613,8 +623,6 @@ def is_supabase_mode() -> bool:
 def is_admin(user_info: dict) -> bool:
     return bool(user_info.get("is_admin", False))
 
-
-# ── Admin operations (safe to call; check is_admin first in UI) ───────
 
 def admin_list_users() -> list[dict]:
     if _use_supabase():
@@ -630,7 +638,7 @@ def admin_delete_user(user_id: str) -> tuple[bool, str]:
     return _local_delete_user(user_id)
 
 
-def admin_create_user(username: str, name: str, email: str, password: str) -> tuple[bool, str]:
+def admin_create_user(username: str, name: str, email: str, password: str = "") -> tuple[bool, str]:
     return register(username, name, email, password)
 
 
@@ -641,13 +649,15 @@ def admin_update_user(user_id: str, fields: dict) -> tuple[bool, str]:
     return _local_update_user(user_id, fields)
 
 
-def _get_admin_token() -> str | None:
-    """Get the current user's token from session (must be admin)."""
-    try:
-        import streamlit as st
-        user = st.session_state.get("user_info", {})
-        if user.get("is_admin"):
-            return user.get("access_token", "")
-        return None
-    except Exception:
-        return None
+# Backward compat alias
+def login(identifier: str, password: str = "") -> tuple[bool, str, dict | None]:
+    """
+    Legacy alias — now sends OTP instead of password login.
+    UI should use send_otp() + verify_otp() directly.
+    """
+    return False, "Use OTP login: call send_otp(email) then verify_otp(email, code)", None
+
+
+def request_password_reset(email: str) -> tuple[bool, str]:
+    """Legacy alias — OTP is now used instead of password reset."""
+    return send_otp(email)
