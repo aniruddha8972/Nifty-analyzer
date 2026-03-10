@@ -28,6 +28,32 @@ if not st.session_state.get("db_ready"):
     ensure_db()
     st.session_state["db_ready"] = True
 
+# ── MAGIC LINK CALLBACK (Supabase redirects here with tokens in URL) ─────────
+# Supabase appends ?access_token=...&refresh_token=...&type=signup to the URL
+# st.query_params captures these on page load.
+if not is_authenticated():
+    try:
+        _qp = st.query_params
+        _at = _qp.get("access_token", "")
+        _rt = _qp.get("refresh_token", "")
+        _tp = _qp.get("type", "")
+        if _at and _tp in ("signup", "magiclink", "email"):
+            from backend.auth import verify_magic_link, load_user_portfolio
+            _ok, _msg, _uinfo = verify_magic_link(_at, _rt)
+            if _ok and _uinfo:
+                st.session_state.update({
+                    "logged_in":     True,
+                    "authenticated": True,
+                    "username":      _uinfo["username"],
+                    "user_info":     _uinfo,
+                })
+                st.session_state["portfolio"] = load_user_portfolio(_uinfo)
+                # Clear tokens from URL to avoid re-processing on refresh
+                st.query_params.clear()
+                st.rerun()
+    except Exception:
+        pass
+
 # ── AUTH GATE ─────────────────────────────────────────────────────────────────
 if not is_authenticated():
     st.markdown("""<style>
