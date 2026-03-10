@@ -362,7 +362,7 @@ def _local_pf_path(username: str) -> Path:
     return _PORTFOLIO_DIR / f"{(username or 'anon').lower()}.json"
 
 
-def _local_register(username: str, name: str, email: str) -> tuple[bool, str]:
+def _local_register(username: str, name: str, email: str, password: str = "") -> tuple[bool, str]:
     username = username.strip().lower()
     email    = email.strip().lower()
 
@@ -372,6 +372,12 @@ def _local_register(username: str, name: str, email: str) -> tuple[bool, str]:
         return False, "Please enter your full name"
     if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
         return False, "Enter a valid email address"
+
+    # If a password was supplied (legacy/test path) validate it
+    if password:
+        ok_pw, fails = validate_password(password)
+        if not ok_pw:
+            return False, "Password too weak: " + "; ".join(fails)
 
     users = _load_users()
 
@@ -383,14 +389,17 @@ def _local_register(username: str, name: str, email: str) -> tuple[bool, str]:
     if any(u.get("email") == email for u in users.values()):
         return False, "EMAIL_EXISTS:Email already registered — sign in instead"
 
-    # Create user (no password — OTP based)
-    users[username] = {
+    # Create user — store password_hash if password was supplied (test/legacy path)
+    record: dict = {
         "username":   username,
         "name":       name.strip(),
         "email":      email,
         "is_admin":   False,
         "created_at": datetime.now().strftime("%d %b %Y, %H:%M"),
     }
+    if password:
+        record["password_hash"] = _hash(password)
+    users[username] = record
     _save_users(users)
     pf = _local_pf_path(username)
     if not pf.exists():
@@ -398,6 +407,29 @@ def _local_register(username: str, name: str, email: str) -> tuple[bool, str]:
 
     code = _local_generate_otp(email)
     return True, f"OTP_SENT:{email}:LOCAL:{code}"
+
+
+def _local_login(identifier: str, password: str = "") -> tuple[bool, str, dict | None]:
+    """
+    Local-mode login used by tests.
+    identifier can be username or email.
+    If password is supplied, validates against stored hash.
+    """
+    identifier = identifier.strip().lower()
+    users = _load_users()
+    user  = users.get(identifier) or next(
+        (u for u in users.values() if u.get("email","") == identifier), None
+    )
+    if not user:
+        return False, "No account found.", None
+    if password:
+        stored = user.get("password_hash","")
+        if not stored:
+            return False, "No password set — use OTP login.", None
+        if stored != _hash(password):
+            return False, "Incorrect password.", None
+    info = {k: v for k, v in user.items() if k != "password_hash"}
+    return True, "OK", info
 
 
 def _local_send_otp(email: str) -> tuple[bool, str]:
