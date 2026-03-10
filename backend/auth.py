@@ -227,6 +227,12 @@ def _sb_register(username: str, name: str, email: str) -> tuple[bool, str]:
             "options": {"should_create_user": True},
         })
     except Exception as e:
+        err = str(e).lower()
+        import re as _re
+        m = _re.search(r'after (\d+) second', str(e))
+        if m or "security purposes" in err or "rate" in err or "too many" in err:
+            secs = m.group(1) if m else "60"
+            return False, f"RATE_LIMIT:{secs}"
         return False, f"Could not send OTP: {e}"
 
     # Store name/username in profiles so verify_otp can upsert it
@@ -273,6 +279,12 @@ def _sb_send_otp(email: str) -> tuple[bool, str]:
         err = str(e).lower()
         if "not found" in err or "not registered" in err or "no user" in err:
             return False, "No account found for that email. Please register first."
+        # Supabase rate-limit: "For security purposes, you can only request this after N seconds"
+        import re as _re
+        m = _re.search(r'after (\d+) second', str(e))
+        if m or "security purposes" in err or "rate" in err or "too many" in err:
+            secs = m.group(1) if m else "60"
+            return False, f"RATE_LIMIT:{secs}"
         return False, f"Could not send OTP: {e}"
 
 
