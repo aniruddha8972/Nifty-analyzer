@@ -201,28 +201,28 @@ GRANT EXECUTE ON FUNCTION public.admin_delete_user_full TO authenticated;
 
 def _get_client():
     from supabase import create_client
-    url = st.secrets["supabase"]["url"]
-    key = st.secrets["supabase"]["anon_key"]
-    return create_client(url, key)
+    from backend.secrets import get_supabase_url, get_supabase_anon_key
+    return create_client(get_supabase_url(), get_supabase_anon_key())
 
 
 def _get_service_client():
     """Service role client — full admin access, bypasses ALL RLS and auth restrictions."""
     from supabase import create_client
-    url     = st.secrets["supabase"]["url"]
-    svc_key = st.secrets.get("supabase", {}).get("service_role_key", "")
+    from backend.secrets import get_supabase_url, get_supabase_service_key
+    svc_key = get_supabase_service_key()
     if not svc_key:
-        raise ValueError("service_role_key not set in .streamlit/secrets.toml")
-    return create_client(url, svc_key)
+        raise ValueError("SUPABASE_SERVICE_ROLE_KEY not set in env or secrets.toml")
+    return create_client(get_supabase_url(), svc_key)
 
 
 def _delete_auth_user(user_id: str) -> None:
     """Delete a user from auth.users using service role key (Admin API)."""
     import urllib.request, json
-    url     = st.secrets["supabase"]["url"]
-    svc_key = st.secrets.get("supabase", {}).get("service_role_key", "")
+    from backend.secrets import get_supabase_url, get_supabase_service_key
+    url     = get_supabase_url()
+    svc_key = get_supabase_service_key()
     if not svc_key:
-        raise ValueError("service_role_key not set in secrets.toml")
+        raise ValueError("SUPABASE_SERVICE_ROLE_KEY not set in env or secrets.toml")
     req = urllib.request.Request(
         f"{url}/auth/v1/admin/users/{user_id}",
         method="DELETE",
@@ -237,13 +237,8 @@ def _delete_auth_user(user_id: str) -> None:
 
 
 def _try_supabase() -> bool:
-    try:
-        return bool(
-            st.secrets.get("supabase", {}).get("url") and
-            st.secrets.get("supabase", {}).get("anon_key")
-        )
-    except Exception:
-        return False
+    from backend.secrets import has_supabase
+    return has_supabase()
 
 
 def _ensure_tables(client) -> dict:

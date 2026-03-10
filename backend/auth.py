@@ -38,22 +38,14 @@ from pathlib import Path
 # ══════════════════════════════════════════════════════════════════════
 
 def _use_supabase() -> bool:
-    try:
-        import streamlit as st
-        return bool(
-            st.secrets.get("supabase", {}).get("url") and
-            st.secrets.get("supabase", {}).get("anon_key")
-        )
-    except Exception:
-        return False
+    from backend.secrets import has_supabase
+    return has_supabase()
 
 
 def _get_supabase_client(access_token: str | None = None):
-    import streamlit as st
     from supabase import create_client
-    url    = st.secrets["supabase"]["url"]
-    key    = st.secrets["supabase"]["anon_key"]
-    client = create_client(url, key)
+    from backend.secrets import get_supabase_url, get_supabase_anon_key
+    client = create_client(get_supabase_url(), get_supabase_anon_key())
     if access_token:
         client.postgrest.auth(access_token)
     return client
@@ -216,11 +208,8 @@ def _sb_register(username: str, name: str, email: str) -> tuple[bool, str]:
         pass
 
     # Get app redirect URL for magic link
-    try:
-        import streamlit as _st2
-        _app_url = _st2.secrets.get("app", {}).get("url", "")
-    except Exception:
-        _app_url = ""
+    from backend.secrets import get_app_url as _get_app_url
+    _app_url = _get_app_url()
 
     # Try sign_up first to create the auth user with metadata
     try:

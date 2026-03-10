@@ -287,8 +287,9 @@ def ensure_db() -> None:
 
     try:
         import streamlit as st
-        sb_url = st.secrets.get("supabase", {}).get("url", "")
-        sb_key = st.secrets.get("supabase", {}).get("anon_key", "")
+        from backend.secrets import get_supabase_url, get_supabase_anon_key
+        sb_url = get_supabase_url()
+        sb_key = get_supabase_anon_key()
 
         if sb_url and sb_key:
             from supabase import create_client
