@@ -258,19 +258,9 @@ def test_admin_delete_removes_auth_user():
     mock_resp.status = 200
     mock_resp.__enter__ = lambda s, *a: mock_resp
     mock_resp.__exit__ = lambda s, *a: None
-    mock_st = MagicMock()
-    mock_st.secrets = {"supabase": {
-        "url": "https://abc.supabase.co",
-        "service_role_key": "svc-key-123"
-    }}
     import backend.db_init as db
-    orig_st = db.st
-    db.st = mock_st
-    try:
-        with patch("urllib.request.urlopen", return_value=mock_resp):
-            db._delete_auth_user("user-uuid-123")
-    finally:
-        db.st = orig_st
+    with patch("backend.secrets.get_supabase_url", return_value="https://abc.supabase.co"),          patch("backend.secrets.get_supabase_service_key", return_value="svc-key-123"),          patch("urllib.request.urlopen", return_value=mock_resp):
+        db._delete_auth_user("user-uuid-123")
 
 def test_admin_delete_no_service_key_warns():
     """Without service_role_key, delete still removes profile but warns."""
