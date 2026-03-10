@@ -92,30 +92,17 @@ def _do_logout():
         del st.session_state[k]
     st.rerun()
 
-# ── Header ────────────────────────────────────────────────────────────────────
-h1, h2 = st.columns([7, 3])
-with h1:
-    _idx  = st.session_state.get("selected_index","Nifty 50")
-    _lbl  = ""
-    if st.session_state.get("from_d") and st.session_state.get("to_d"):
-        _lbl = f"{st.session_state['from_d'].strftime('%d %b %Y')} → {st.session_state['to_d'].strftime('%d %b %Y')}"
-    render_header(_lbl, index_name=_idx, stock_count=len(INDEX_UNIVERSE.get(_idx,{})))
-with h2:
-    name     = user.get("name","")
-    username = user.get("username","")
-    initials = "".join(w[0].upper() for w in name.split()[:2]) if name else "?"
-    st.markdown(f"""
-    <div style="display:flex;align-items:center;justify-content:flex-end;
-                gap:10px;padding-top:18px">
-      <div style="text-align:right">
-        <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;
-                    font-weight:700;color:#e8e9f5">{name}</div>
-        <div style="font-family:'Inter',sans-serif;font-size:10px;
-                    color:#5a5e8a">@{username}</div>
-      </div>
-      <div class="avatar">{initials}</div>
-    </div>""", unsafe_allow_html=True)
-    if st.button("⏻ Log Out", key="logout_header", use_container_width=True):
+# ── Header (full-width, self-contained) ───────────────────────────────────────
+_idx = st.session_state.get("selected_index","Nifty 50")
+_lbl = ""
+if st.session_state.get("from_d") and st.session_state.get("to_d"):
+    _lbl = f"{st.session_state['from_d'].strftime('%d %b %Y')} → {st.session_state['to_d'].strftime('%d %b %Y')}"
+render_header(_lbl, index_name=_idx,
+              stock_count=len(INDEX_UNIVERSE.get(_idx,{})),
+              user=user)
+_, _logout_col = st.columns([9, 1])
+with _logout_col:
+    if st.button("⏻ Logout", key="logout_header", use_container_width=True):
         _do_logout()
 
 # ── Analysis controls ─────────────────────────────────────────────────────────
