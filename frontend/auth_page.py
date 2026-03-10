@@ -296,6 +296,20 @@ def _signin(sb_mode: bool):
         _otp_verify(sb_mode)
         return
 
+    # Show success banner if redirected from registration
+    reg_email = st.session_state.pop("register_success", None)
+    if reg_email:
+        st.markdown(f"""
+        <div style="background:rgba(0,229,160,.07);border:1px solid rgba(0,229,160,.3);
+                    border-radius:10px;padding:14px 16px;margin-bottom:16px">
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:700;
+                      color:#00e5a0;letter-spacing:1px;margin-bottom:4px">✅ Account Created!</div>
+          <div style="font-family:'Inter',sans-serif;font-size:13px;color:#4a9a78;line-height:1.6">
+            Magic link sent to <strong>{reg_email}</strong><br>
+            Click the link in your email to sign in.
+          </div>
+        </div>""", unsafe_allow_html=True)
+
     st.markdown("""
     <div style="font-family:'IBM Plex Mono',monospace;font-size:8px;letter-spacing:3px;
                 text-transform:uppercase;color:#2e315c;margin:0 0 10px">── Sign in with email</div>
@@ -398,11 +412,11 @@ def _register(sb_mode: bool):
     st.markdown(
         f'<div style="background:rgba(0,229,160,.025);border:1px solid rgba(0,229,160,.08);'
         f'border-radius:8px;padding:10px 14px;font-size:12px;color:#3a3e6a;'
-        f'line-height:1.7;margin:8px 0">{"☁ Stored in Supabase." if sb_mode else "⚡ Local mode."}'
+        f'line-height:1.7;margin:8px 0">{"☁ Magic link via Supabase." if sb_mode else "⚡ Local mode — OTP code."}'
         f' Username: 3–20 chars (letters, numbers, _).</div>',
         unsafe_allow_html=True)
 
-    if st.button("Create Account & Send Code →", type="primary",
+    if st.button("Create Account → Verify Email ✉", type="primary",
                  use_container_width=True, key="rg_btn"):
         n = (name  or "").strip()
         u = (uname or "").strip()
@@ -415,11 +429,13 @@ def _register(sb_mode: bool):
             if ok:
                 parts = result.split(":")
                 if result.startswith("MAGIC_LINK:"):
-                    # Magic link sent — show waiting screen (no OTP input needed)
+                    # Magic link sent — switch to signin tab with success banner
                     st.session_state.update({
-                        "otp_step":    "magic_wait",
-                        "otp_email":   parts[1] if len(parts) >= 2 else e,
-                        "otp_context": "register",
+                        "auth_tab":       "signin",
+                        "otp_step":       "email",
+                        "otp_context":    "",
+                        "otp_email":      "",
+                        "register_success": parts[1] if len(parts) >= 2 else e,
                     })
                 else:
                     # Local mode fallback — use OTP code
