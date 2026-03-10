@@ -19,6 +19,12 @@ def _mock(name):
     return m
 
 _st = _mock("streamlit")
+# Also mock streamlit.components so auth_page import doesn't crash
+_sc  = _mock("streamlit.components")
+_sc1 = _mock("streamlit.components.v1")
+_sc1.html = lambda *a, **kw: None
+_st.components = _sc
+_sc.v1 = _sc1
 _st.session_state = {}
 _st.secrets = {"supabase": {"url": "https://x.supabase.co", "anon_key": "anon_key"}}
 _st.cache_data     = lambda *a, **kw: (lambda f: f)

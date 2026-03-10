@@ -15,6 +15,23 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 ROOT = Path(__file__).parent.parent
+
+def _all_src():
+    """Read all app source files for pattern-matching tests."""
+    base = (ROOT / "app.py").read_text()
+    for sub in ["pages", "frontend"]:
+        d = ROOT / sub
+        if d.exists():
+            for p in sorted(d.glob("*.py")):
+                base += chr(10) + p.read_text()
+    return base
+
+
+
+
+
+
+
 sys.path.insert(0, str(ROOT))
 
 # ── Mock Streamlit & heavy deps ────────────────────────────────────────────────
@@ -202,23 +219,23 @@ def test_form_src_uses_active_not_stocks():
     expect("sorted(active.keys())" in src, "selectbox should use sorted(active.keys())")
 
 def test_app_passes_universe_to_form():
-    src = (ROOT / "app.py").read_text()
+    src = _all_src()
     expect("render_add_holding_form(universe=" in src,
            "app.py must pass universe= to render_add_holding_form")
 
 def test_app_uses_index_universe_for_form():
-    src = (ROOT / "app.py").read_text()
+    src = _all_src()
     expect("INDEX_UNIVERSE" in src, "app.py must use INDEX_UNIVERSE")
     # Should read selected_index from session_state for form
     expect('session_state.get("selected_index"' in src or
            'session_state["selected_index"]' in src)
 
 def test_app_clears_bt_cache_on_index_change():
-    src = (ROOT / "app.py").read_text()
+    src = _all_src()
     expect('"bt_result"' in src, "app.py should clear bt_result on index change")
 
 def test_app_clears_corr_cache_on_index_change():
-    src = (ROOT / "app.py").read_text()
+    src = _all_src()
     expect('"corr_result"' in src, "app.py should clear corr_result on index change")
 
 test("PORTFOLIO — render_add_holding_form has universe param",   test_form_has_universe_param)
@@ -410,7 +427,7 @@ def test_fetch_all_stocks_param():
            "stocks param default should be None or dict")
 
 def test_index_selector_in_app():
-    src = (ROOT / "app.py").read_text()
+    src = _all_src()
     expect("Index / Universe" in src or "INDEX_OPTIONS" in src,
            "app.py must have index selector UI")
 
@@ -494,12 +511,12 @@ def test_rf_njobs_minus1():
     expect("n_jobs=-1" in src_txt, "RF should use n_jobs=-1 for speed on large datasets")
 
 def test_app_passes_universe_to_predict():
-    src_txt = (ROOT / "app.py").read_text()
+    src_txt = _all_src()
     expect("predict(all_stats, universe=_universe)" in src_txt,
            "app.py must pass universe= to predict()")
 
 def test_5yr_label_in_ml_banner():
-    src_txt = (ROOT / "app.py").read_text()
+    src_txt = _all_src()
     expect("5yr" in src_txt or "5-year" in src_txt or "5yr daily" in src_txt,
            "ML info banner should mention 5yr history")
 

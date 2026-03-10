@@ -9,6 +9,23 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 ROOT = Path(__file__).parent.parent
+
+def _all_src():
+    """Read all app source files for pattern-matching tests."""
+    base = (ROOT / "app.py").read_text()
+    for sub in ["pages", "frontend"]:
+        d = ROOT / sub
+        if d.exists():
+            for p in sorted(d.glob("*.py")):
+                base += chr(10) + p.read_text()
+    return base
+
+
+
+
+
+
+
 sys.path.insert(0, str(ROOT))
 
 # ── Mock externals ─────────────────────────────────────────────────────
@@ -77,7 +94,7 @@ def _mock_client(rpc_data=None, table_data=None, raise_on=None):
 test("SYNTAX — db_init.py",       lambda: ast.parse((ROOT/"backend/db_init.py").read_text()))
 test("SYNTAX — auth.py",          lambda: ast.parse((ROOT/"backend/auth.py").read_text()))
 test("SYNTAX — portfolio.py",     lambda: ast.parse((ROOT/"backend/portfolio.py").read_text()))
-test("SYNTAX — app.py",           lambda: ast.parse((ROOT/"app.py").read_text()))
+test("SYNTAX — app.py",           lambda: ast.parse(_all_src()))
 test("SYNTAX — admin_dashboard",  lambda: ast.parse((ROOT/"frontend/admin_dashboard.py").read_text()))
 
 def test_db_init_exports():
@@ -445,26 +462,26 @@ test("PORTFOLIO — P&L handles zero price",              test_pnl_zero_price)
 # ══════════════════════════════════════════════════════════════════════
 
 def test_app_imports_persist():
-    src = (ROOT/"app.py").read_text()
+    src = _all_src()
     expect("_persist" in src, "_persist not imported in app.py")
     expect("reload_portfolio_from_db" in src, "reload_portfolio_from_db not in app.py")
 
 def test_app_has_save_button():
-    src = (ROOT/"app.py").read_text()
+    src = _all_src()
     expect("💾" in src or "Save" in src, "Save button missing from app.py")
 
 def test_app_has_refresh_button():
-    src = (ROOT/"app.py").read_text()
+    src = _all_src()
     expect("🔄" in src or "Refresh" in src, "Refresh button missing from app.py")
 
 def test_app_shows_save_feedback():
-    src = (ROOT/"app.py").read_text()
+    src = _all_src()
     expect("portfolio saved" in src.lower() or "saved to cloud" in src.lower(),
            "Save feedback message missing")
 
 def test_app_no_naked_persist():
     """_persist() should always capture return value, never called bare."""
-    src = (ROOT/"app.py").read_text()
+    src = _all_src()
     import re
     bare = re.findall(r'(?<!\w)_persist\(\)(?!\s*$)(?!\s*#)', src)
     # All calls should be: ok, msg = _persist()

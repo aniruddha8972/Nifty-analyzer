@@ -18,6 +18,23 @@ from pathlib import Path
 from datetime import date, timedelta
 
 ROOT = Path(__file__).parent.parent
+
+def _all_src():
+    """Read all app source files for pattern-matching tests."""
+    base = (ROOT / "app.py").read_text()
+    for sub in ["pages", "frontend"]:
+        d = ROOT / sub
+        if d.exists():
+            for p in sorted(d.glob("*.py")):
+                base += chr(10) + p.read_text()
+    return base
+
+
+
+
+
+
+
 sys.path.insert(0, str(ROOT))
 
 # ── Mocks ─────────────────────────────────────────────────────────────────────
@@ -475,7 +492,7 @@ def test_analytics_backend_imports():
         expect(callable(fn), f"{fn.__name__} is not callable")
 
 def test_app_py_has_analytics_tabs():
-    app_src = (ROOT / "app.py").read_text()
+    app_src = _all_src()
     expect("render_heatmap_tab"     in app_src, "render_heatmap_tab not in app.py")
     expect("render_backtest_tab"    in app_src, "render_backtest_tab not in app.py")
     expect("render_correlation_tab" in app_src, "render_correlation_tab not in app.py")
