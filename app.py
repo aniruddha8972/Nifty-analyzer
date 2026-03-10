@@ -163,7 +163,7 @@ if run:
                                  INDEX_UNIVERSE["Nifty 50"])
     total  = len(_uni)
     prog   = st.progress(0, text=f"Fetching {total} stocks…")
-    def _prog(i,sym): prog.progress((i+1)/total, text=f"Fetching {sym}.NS ({i+1}/{total})")
+    def _prog(i,sym,tot=total): prog.progress((i+1)/tot, text=f"Fetching {sym}.NS ({i+1}/{tot})")
     stats  = fetch_all(from_d, to_d, _prog, stocks=_uni)
     prog.empty()
     if not stats:
