@@ -17,7 +17,7 @@ inject()
 init_defaults()
 
 if not is_authenticated():
-    st.switch_page("app.py")
+    st.error("⛔ Please log in at the main app page.")
     st.stop()
 
 render_sidebar("dashboard")
@@ -218,7 +218,7 @@ with mcol1:
           <div>
             <div style="font-family:'JetBrains Mono',monospace;font-size:12px;
                         font-weight:700;color:#e8e9f5">{s['symbol']}</div>
-            <div style="font-family:'DM Sans',sans-serif;font-size:9px;color:#3a3e6a">{s['sector']}</div>
+            <div style="font-family:'Inter',sans-serif;font-size:9px;color:#3a3e6a">{s['sector']}</div>
           </div>
           <div style="font-family:'JetBrains Mono',monospace;font-size:16px;
                       font-weight:700;color:#00d4aa">{chg:+.2f}%</div>
@@ -240,7 +240,7 @@ with mcol2:
           <div>
             <div style="font-family:'JetBrains Mono',monospace;font-size:12px;
                         font-weight:700;color:#e8e9f5">{s['symbol']}</div>
-            <div style="font-family:'DM Sans',sans-serif;font-size:9px;color:#3a3e6a">{s['sector']}</div>
+            <div style="font-family:'Inter',sans-serif;font-size:9px;color:#3a3e6a">{s['sector']}</div>
           </div>
           <div style="font-family:'JetBrains Mono',monospace;font-size:16px;
                       font-weight:700;color:#ff3d5a">{chg:+.2f}%</div>
@@ -265,7 +265,7 @@ for col, (pg, ic, lbl, desc) in zip(qc, page_links):
           <div style="font-size:24px;margin-bottom:8px">{ic}</div>
           <div style="font-family:'JetBrains Mono',monospace;font-size:10px;
                       font-weight:700;color:#e8e9f5;margin-bottom:4px">{lbl}</div>
-          <div style="font-family:'DM Sans',sans-serif;font-size:9px;color:#3a3e6a">{desc}</div>
+          <div style="font-family:'Inter',sans-serif;font-size:9px;color:#3a3e6a">{desc}</div>
         </div>
         """, unsafe_allow_html=True)
         if st.button(f"Open {lbl}", key=f"ql_{lbl}", use_container_width=True):

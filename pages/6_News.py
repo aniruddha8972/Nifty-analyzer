@@ -8,7 +8,9 @@ from frontend.design  import inject, render_page_hero
 from frontend.session import init_defaults, is_authenticated, get_data
 from frontend.sidebar import render_sidebar
 inject(); init_defaults()
-if not is_authenticated(): st.switch_page("app.py"); st.stop()
+if not is_authenticated():
+    st.error("⛔ Please log in — return to the main page.")
+    st.stop()
 render_sidebar("news")
 st.markdown('<style>[data-testid="stSidebarNav"]{display:none!important}</style>', unsafe_allow_html=True)
 

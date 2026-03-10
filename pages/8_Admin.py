@@ -9,7 +9,9 @@ from frontend.session import init_defaults, is_authenticated, get_user
 from frontend.sidebar import render_sidebar
 from backend.auth     import is_admin
 inject(); init_defaults()
-if not is_authenticated(): st.switch_page("app.py"); st.stop()
+if not is_authenticated():
+    st.error("⛔ Please log in — return to the main page.")
+    st.stop()
 if not is_admin(get_user()):
     st.error("⛔ Access denied — Admins only.")
     st.stop()
