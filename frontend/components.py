@@ -14,14 +14,57 @@ def render_header(label: str = "", index_name: str = "Nifty 50",
     from datetime import datetime
     import streamlit as _st
 
-    now      = datetime.now()
+    from datetime import timezone, timedelta as _td
+    _IST = timezone(_td(hours=5, minutes=30))
+    now  = datetime.now(_IST)
+
+    # NSE holidays 2025-2026
+    _NSE_HOLIDAYS = {
+        "2025-01-26","2025-02-26","2025-03-14","2025-03-31",
+        "2025-04-10","2025-04-14","2025-04-18","2025-05-01",
+        "2025-08-15","2025-08-27","2025-10-02","2025-10-20",
+        "2025-10-21","2025-11-05","2025-12-25",
+        "2026-01-26","2026-03-02","2026-03-20","2026-04-02",
+        "2026-04-03","2026-04-14","2026-04-30","2026-08-17",
+        "2026-10-01","2026-10-19","2026-11-04","2026-12-25",
+    }
+    _mins      = now.hour * 60 + now.minute
+    _open      = 9 * 60 + 15    # 09:15 IST
+    _close     = 15 * 60 + 30   # 15:30 IST
+    _is_wkend  = now.weekday() >= 5
+    _is_hol    = now.strftime("%Y-%m-%d") in _NSE_HOLIDAYS
+    _in_hours  = _open <= _mins < _close
+    is_live    = _in_hours and not _is_wkend and not _is_hol
+
+    # Status label
+    if _is_wkend:
+        mkt_txt = "WEEKEND"
+        mkt_c   = "#f0a500"
+        mkt_bg  = "rgba(240,165,0,.07)"
+        mkt_bdr = "rgba(240,165,0,.22)"
+    elif _is_hol:
+        mkt_txt = "HOLIDAY"
+        mkt_c   = "#f0a500"
+        mkt_bg  = "rgba(240,165,0,.07)"
+        mkt_bdr = "rgba(240,165,0,.22)"
+    elif is_live:
+        mkt_txt = "MARKET LIVE"
+        mkt_c   = "#00e5a0"
+        mkt_bg  = "rgba(0,229,160,.07)"
+        mkt_bdr = "rgba(0,229,160,.22)"
+    elif _mins < _open:
+        mkt_txt = "PRE-MARKET"
+        mkt_c   = "#4c8eff"
+        mkt_bg  = "rgba(76,142,255,.07)"
+        mkt_bdr = "rgba(76,142,255,.22)"
+    else:
+        mkt_txt = "MARKET CLOSED"
+        mkt_c   = "#ff3d5a"
+        mkt_bg  = "rgba(255,61,90,.07)"
+        mkt_bdr = "rgba(255,61,90,.22)"
+
     time_str = now.strftime("%H:%M:%S")
     date_str = now.strftime("%a, %d %b %Y")
-    is_live  = 9 <= now.hour < 16
-    mkt_txt  = "MARKET LIVE" if is_live else "MARKET CLOSED"
-    mkt_c    = "#00e5a0"             if is_live else "#ff3d5a"
-    mkt_bg   = "rgba(0,229,160,.07)" if is_live else "rgba(255,61,90,.07)"
-    mkt_bdr  = "rgba(0,229,160,.22)" if is_live else "rgba(255,61,90,.22)"
 
     name     = (user or {}).get("name", "")
     username = (user or {}).get("username", "")

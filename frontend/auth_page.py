@@ -565,6 +565,29 @@ def render_auth_page() -> bool:
 
     st.markdown(_CSS, unsafe_allow_html=True)
 
+    # Intercept Supabase magic-link tokens from URL fragment (#access_token=...&type=signup)
+    # Streamlit cannot read fragments directly — JS extracts them and redirects with ?params
+    st.markdown("""
+    <script>
+    (function(){
+      var h = window.location.hash;
+      if(!h) return;
+      var p = {};
+      h.replace(/^#/,'').split('&').forEach(function(kv){
+        var parts=kv.split('='); if(parts.length===2) p[parts[0]]=decodeURIComponent(parts[1]);
+      });
+      var at=p['access_token'], rt=p['refresh_token']||'', tp=p['type']||'';
+      var valid=['signup','magiclink','email','recovery'];
+      if(at && valid.indexOf(tp)>=0){
+        var url=window.location.pathname
+          +'?access_token='+encodeURIComponent(at)
+          +'&refresh_token='+encodeURIComponent(rt)
+          +'&type='+encodeURIComponent(tp);
+        window.location.replace(url);
+      }
+    })();
+    </script>""", unsafe_allow_html=True)
+
     # Animated shell — rendered via components.html (decorative only, no form widgets)
     components.html(_shell_html(cur_tab, sb_mode), height=220, scrolling=False)
 
