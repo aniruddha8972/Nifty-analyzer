@@ -9,19 +9,190 @@ import streamlit as st
 # ── App header ─────────────────────────────────────────────────────────────────
 
 def render_header(label: str = "", index_name: str = "Nifty 50", stock_count: int = 50) -> None:
+    from datetime import datetime
     import streamlit as _st
-    date_html = (
-        f'<div class="app-range">📅 {label}</div>' if label else ""
-    )
+
+    now       = datetime.now()
+    time_str  = now.strftime("%H:%M:%S")
+    date_str  = now.strftime("%a, %d %b %Y")
+    # Market hours: NSE 09:15–15:30 IST (we show live/closed based on hour)
+    hour      = now.hour
+    is_live   = 9 <= hour < 16
+    mkt_label = "MARKET LIVE" if is_live else "MARKET CLOSED"
+    mkt_color = "#00e5a0" if is_live else "#ff3d5a"
+    mkt_bg    = "rgba(0,229,160,.08)" if is_live else "rgba(255,61,90,.08)"
+    mkt_bdr   = "rgba(0,229,160,.25)" if is_live else "rgba(255,61,90,.25)"
+
+    range_pill = ""
+    if label:
+        range_pill = f"""
+        <div style="display:inline-flex;align-items:center;gap:6px;
+                    background:rgba(76,142,255,.08);border:1px solid rgba(76,142,255,.2);
+                    border-radius:6px;padding:4px 12px;
+                    font-family:'IBM Plex Mono',monospace;font-size:9px;
+                    letter-spacing:1.5px;text-transform:uppercase;color:#4c8eff">
+          <span style="opacity:.6">RANGE</span>
+          <span style="font-weight:600">{label}</span>
+        </div>"""
+
     _st.markdown(f"""
-    <div class="app-header">
-      <div class="app-wordmark">NSE · Market Intelligence</div>
-      <div class="app-title">NSE Market Analyzer</div>
-      <div class="app-subtitle">
-        {index_name} &nbsp;·&nbsp; {stock_count} stocks &nbsp;·&nbsp;
-        ML ensemble prediction &nbsp;·&nbsp; Live news sentiment
+    <style>
+    @keyframes hdr-pulse {{
+      0%,100% {{ opacity:1; }} 50% {{ opacity:.4; }}
+    }}
+    @keyframes hdr-slide {{
+      from {{ opacity:0; transform:translateY(-8px); }}
+      to   {{ opacity:1; transform:translateY(0); }}
+    }}
+    @keyframes shimmer-bar {{
+      0%   {{ background-position: 200% center; }}
+      100% {{ background-position:-200% center; }}
+    }}
+    .nse-header-wrap {{
+      position:relative; overflow:hidden;
+      background:linear-gradient(135deg,#06061a 0%,#080820 40%,#060616 100%);
+      border:1px solid #1a1a3a; border-radius:14px;
+      margin-bottom:22px; padding:0;
+      box-shadow:0 8px 40px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.04);
+      animation: hdr-slide .35s ease both;
+    }}
+    .nse-header-shimmer {{
+      position:absolute; top:0; left:0; right:0; height:2px;
+      background:linear-gradient(90deg,
+        transparent 0%,#00e5a0 20%,#f0a500 40%,#4c8eff 60%,#00e5a0 80%,transparent 100%);
+      background-size:200% auto;
+      animation: shimmer-bar 4s linear infinite;
+    }}
+    .nse-header-grid {{
+      display:grid;
+      grid-template-columns:1fr auto;
+      align-items:center;
+      gap:16px;
+      padding:18px 24px 16px;
+    }}
+    .nse-header-noise {{
+      position:absolute;inset:0;pointer-events:none;opacity:.025;
+      background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+    }}
+    .nse-wordmark {{
+      font-family:'IBM Plex Mono',monospace;
+      font-size:8px; letter-spacing:5px; text-transform:uppercase;
+      color:#00e5a0; opacity:.75; margin-bottom:6px;
+      display:flex; align-items:center; gap:10px;
+    }}
+    .nse-wordmark::before {{
+      content:''; display:inline-block;
+      width:18px; height:1px; background:#00e5a0; opacity:.5;
+    }}
+    .nse-title {{
+      font-family:'IBM Plex Mono',monospace;
+      font-size:clamp(20px,2.5vw,28px); font-weight:700;
+      letter-spacing:-.5px; line-height:1.1;
+      background:linear-gradient(135deg,#e8e9f5 0%,#9fa3c4 60%,#5a5e8a 100%);
+      -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+      background-clip:text;
+    }}
+    .nse-title em {{
+      font-style:normal;
+      background:linear-gradient(135deg,#00e5a0,#00b878);
+      -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+      background-clip:text;
+    }}
+    .nse-meta {{
+      display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin-top:10px;
+    }}
+    .nse-pill {{
+      display:inline-flex; align-items:center; gap:5px;
+      padding:3px 10px; border-radius:5px;
+      font-family:'IBM Plex Mono',monospace;
+      font-size:9px; font-weight:500; letter-spacing:1px; text-transform:uppercase;
+    }}
+    .nse-pill-idx {{
+      background:rgba(240,165,0,.08); border:1px solid rgba(240,165,0,.2); color:#f0a500;
+    }}
+    .nse-pill-ml {{
+      background:rgba(76,142,255,.08); border:1px solid rgba(76,142,255,.2); color:#4c8eff;
+    }}
+    .nse-pill-snt {{
+      background:rgba(0,229,160,.08); border:1px solid rgba(0,229,160,.2); color:#00e5a0;
+    }}
+    .nse-pill-cnt {{
+      background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); color:#5a5e8a;
+    }}
+    .nse-right {{
+      display:flex; flex-direction:column; align-items:flex-end; gap:8px;
+    }}
+    .nse-clock {{
+      font-family:'IBM Plex Mono',monospace;
+      font-size:22px; font-weight:700; color:#e8e9f5;
+      letter-spacing:2px; line-height:1;
+    }}
+    .nse-date {{
+      font-family:'IBM Plex Mono',monospace;
+      font-size:9px; letter-spacing:2px; text-transform:uppercase;
+      color:#3a3e6a;
+    }}
+    .nse-status {{
+      display:inline-flex; align-items:center; gap:6px;
+      padding:4px 12px; border-radius:6px;
+      font-family:'IBM Plex Mono',monospace;
+      font-size:9px; font-weight:700; letter-spacing:2px;
+    }}
+    .nse-dot {{
+      width:6px; height:6px; border-radius:50%;
+      animation: hdr-pulse 2s ease-in-out infinite;
+    }}
+    .nse-divider {{
+      height:1px; background:linear-gradient(90deg,transparent,#1a1a3a 20%,#1a1a3a 80%,transparent);
+      margin:0 24px;
+    }}
+    .nse-footer-bar {{
+      display:flex; align-items:center; justify-content:space-between;
+      padding:8px 24px 12px; flex-wrap:wrap; gap:8px;
+    }}
+    .nse-tag {{
+      font-family:'IBM Plex Mono',monospace;
+      font-size:8px; letter-spacing:2px; text-transform:uppercase; color:#2e315c;
+    }}
+    </style>
+
+    <div class="nse-header-wrap">
+      <div class="nse-header-noise"></div>
+      <div class="nse-header-shimmer"></div>
+      <div class="nse-header-grid">
+
+        <!-- LEFT: Brand + meta -->
+        <div>
+          <div class="nse-wordmark">Quantitative Intelligence Platform</div>
+          <div class="nse-title">NSE <em>Market</em> Analyzer</div>
+          <div class="nse-meta">
+            <span class="nse-pill nse-pill-idx">⬡ {index_name}</span>
+            <span class="nse-pill nse-pill-cnt">{stock_count} Stocks</span>
+            <span class="nse-pill nse-pill-ml">⚙ RF + GB + Ridge</span>
+            <span class="nse-pill nse-pill-snt">◎ News Sentiment</span>
+            {range_pill}
+          </div>
+        </div>
+
+        <!-- RIGHT: Clock + status -->
+        <div class="nse-right">
+          <div class="nse-clock">{time_str} <span style="font-size:11px;color:#2e315c">IST</span></div>
+          <div class="nse-date">{date_str}</div>
+          <div class="nse-status"
+               style="background:{mkt_bg};border:1px solid {mkt_bdr};color:{mkt_color}">
+            <span class="nse-dot" style="background:{mkt_color}"></span>
+            {mkt_label}
+          </div>
+        </div>
+
       </div>
-      {date_html}
+
+      <div class="nse-divider"></div>
+      <div class="nse-footer-bar">
+        <span class="nse-tag">NSE · BSE · India Equity Markets</span>
+        <span class="nse-tag">5yr historical · ML ensemble · real-time sentiment</span>
+        <span class="nse-tag">⚠ Not financial advice</span>
+      </div>
     </div>
     """, unsafe_allow_html=True)
 
