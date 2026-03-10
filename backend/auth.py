@@ -93,27 +93,62 @@ def _suggest_usernames(base: str, taken: set[str]) -> list[str]:
 #  LOCAL OTP STORE (in-memory, 60s TTL)
 # ══════════════════════════════════════════════════════════════════════
 
-_LOCAL_OTP: dict[str, tuple[str, float]] = {}   # email → (code, expires_at)
-_OTP_TTL = 300   # 5 minutes
+_LOCAL_OTP: dict[str, tuple[str, float]] = {}   # in-memory cache
+_OTP_TTL = 600   # 10 minutes
+_OTP_FILE = Path(__file__).parent.parent / "data" / ".otp_store.json"  # persisted
+
+
+def _otp_load() -> dict:
+    """Load OTP store from file (survives module reloads)."""
+    try:
+        if _OTP_FILE.exists():
+            data = json.loads(_OTP_FILE.read_text())
+            # Merge into in-memory dict
+            now = time.time()
+            for email, (code, exp) in list(data.items()):
+                if exp > now:
+                    _LOCAL_OTP[email] = (code, exp)
+                else:
+                    data.pop(email, None)
+    except Exception:
+        pass
+    return _LOCAL_OTP
+
+
+def _otp_save() -> None:
+    """Persist OTP store to file."""
+    try:
+        _OTP_FILE.parent.mkdir(parents=True, exist_ok=True)
+        # Only save non-expired entries
+        now = time.time()
+        to_save = {e: list(v) for e, v in _LOCAL_OTP.items() if v[1] > now}
+        _OTP_FILE.write_text(json.dumps(to_save))
+    except Exception:
+        pass
 
 
 def _local_generate_otp(email: str) -> str:
+    _otp_load()  # sync from file first
     code = str(random.randint(100000, 999999))
     _LOCAL_OTP[email] = (code, time.time() + _OTP_TTL)
+    _otp_save()
     return code
 
 
 def _local_verify_otp_code(email: str, code: str) -> bool:
+    _otp_load()  # sync from file — critical after module reload
     entry = _LOCAL_OTP.get(email)
     if not entry:
         return False
     stored_code, expires_at = entry
     if time.time() > expires_at:
-        del _LOCAL_OTP[email]
+        _LOCAL_OTP.pop(email, None)
+        _otp_save()
         return False
     if stored_code != code.strip():
         return False
-    del _LOCAL_OTP[email]
+    _LOCAL_OTP.pop(email, None)
+    _otp_save()
     return True
 
 
@@ -167,41 +202,12 @@ def _sb_register(username: str, name: str, email: str) -> tuple[bool, str]:
     except Exception:
         pass
 
-    # Send OTP — Supabase will create the auth user on first verify
-    # We store the intended username+name in a pending_profiles table or
-    # just pass them via Supabase sign_up metadata.
+    # Store pending profile in session so we can upsert after magic-link verify
     try:
-        client.auth.sign_up({
-            "email": email,
-            "password": _random_password(),   # required by sign_up API; user never sees it
-            "options": {
-                "data": {"name": name.strip(), "username": username},
-            },
-        })
-    except Exception as e:
-        err = str(e).lower()
-        if "already registered" in err:
-            return False, "EMAIL_EXISTS:Email already registered — sign in instead"
-        # If sign_up fails (user may already exist from prior attempt), proceed
-        pass
-
-    # Send OTP
-    try:
-        client.auth.sign_in_with_otp({
-            "email": email,
-            "options": {"should_create_user": True},
-        })
-    except Exception as e:
-        return False, f"Could not send OTP: {e}"
-
-    # Store name/username in profiles so verify_otp can upsert it
-    # We use a temporary record with no id (will be filled on verify)
-    try:
-        # Store as pending — will be completed on OTP verify
-        import streamlit as st
-        if "pending_profiles" not in st.session_state:
-            st.session_state["pending_profiles"] = {}
-        st.session_state["pending_profiles"][email] = {
+        import streamlit as _st
+        if "pending_profiles" not in _st.session_state:
+            _st.session_state["pending_profiles"] = {}
+        _st.session_state["pending_profiles"][email] = {
             "username": username,
             "name":     name.strip(),
             "email":    email,
@@ -209,7 +215,48 @@ def _sb_register(username: str, name: str, email: str) -> tuple[bool, str]:
     except Exception:
         pass
 
-    return True, f"OTP_SENT:{email}"
+    # Get app redirect URL for magic link
+    try:
+        import streamlit as _st2
+        _app_url = _st2.secrets.get("app", {}).get("url", "")
+    except Exception:
+        _app_url = ""
+
+    # Try sign_up first to create the auth user with metadata
+    try:
+        _opts = {"data": {"name": name.strip(), "username": username}}
+        if _app_url:
+            _opts["email_redirect_to"] = _app_url
+        client.auth.sign_up({
+            "email": email,
+            "password": _random_password(),
+            "options": _opts,
+        })
+    except Exception as e:
+        err = str(e).lower()
+        if "already registered" in err or "already been registered" in err:
+            return False, "EMAIL_EXISTS:Email already registered — sign in instead"
+        pass  # may already exist — fall through to magic link
+
+    # Send magic link via sign_in_with_otp (emailOtp=False → sends clickable link)
+    try:
+        _ml_opts: dict = {"should_create_user": True}
+        if _app_url:
+            _ml_opts["email_redirect_to"] = _app_url
+        client.auth.sign_in_with_otp({
+            "email": email,
+            "options": _ml_opts,
+        })
+    except Exception as e:
+        err = str(e).lower()
+        import re as _re
+        m = _re.search(r'after (\d+) second', str(e))
+        if m or "security purposes" in err or "rate" in err or "too many" in err:
+            secs = m.group(1) if m else "60"
+            return False, f"RATE_LIMIT:{secs}"
+        return False, f"Could not send magic link: {e}"
+
+    return True, f"MAGIC_LINK:{email}"
 
 
 def _random_password() -> str:
@@ -238,6 +285,12 @@ def _sb_send_otp(email: str) -> tuple[bool, str]:
         err = str(e).lower()
         if "not found" in err or "not registered" in err or "no user" in err:
             return False, "No account found for that email. Please register first."
+        # Supabase rate-limit: "For security purposes, you can only request this after N seconds"
+        import re as _re
+        m = _re.search(r'after (\d+) second', str(e))
+        if m or "security purposes" in err or "rate" in err or "too many" in err:
+            secs = m.group(1) if m else "60"
+            return False, f"RATE_LIMIT:{secs}"
         return False, f"Could not send OTP: {e}"
 
 
@@ -362,7 +415,7 @@ def _local_pf_path(username: str) -> Path:
     return _PORTFOLIO_DIR / f"{(username or 'anon').lower()}.json"
 
 
-def _local_register(username: str, name: str, email: str) -> tuple[bool, str]:
+def _local_register(username: str, name: str, email: str, password: str = "") -> tuple[bool, str]:
     username = username.strip().lower()
     email    = email.strip().lower()
 
@@ -372,6 +425,12 @@ def _local_register(username: str, name: str, email: str) -> tuple[bool, str]:
         return False, "Please enter your full name"
     if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
         return False, "Enter a valid email address"
+
+    # If a password was supplied (legacy/test path) validate it
+    if password:
+        ok_pw, fails = validate_password(password)
+        if not ok_pw:
+            return False, "Password too weak: " + "; ".join(fails)
 
     users = _load_users()
 
@@ -383,14 +442,17 @@ def _local_register(username: str, name: str, email: str) -> tuple[bool, str]:
     if any(u.get("email") == email for u in users.values()):
         return False, "EMAIL_EXISTS:Email already registered — sign in instead"
 
-    # Create user (no password — OTP based)
-    users[username] = {
+    # Create user — store password_hash if password was supplied (test/legacy path)
+    record: dict = {
         "username":   username,
         "name":       name.strip(),
         "email":      email,
         "is_admin":   False,
         "created_at": datetime.now().strftime("%d %b %Y, %H:%M"),
     }
+    if password:
+        record["password_hash"] = _hash(password)
+    users[username] = record
     _save_users(users)
     pf = _local_pf_path(username)
     if not pf.exists():
@@ -398,6 +460,29 @@ def _local_register(username: str, name: str, email: str) -> tuple[bool, str]:
 
     code = _local_generate_otp(email)
     return True, f"OTP_SENT:{email}:LOCAL:{code}"
+
+
+def _local_login(identifier: str, password: str = "") -> tuple[bool, str, dict | None]:
+    """
+    Local-mode login used by tests.
+    identifier can be username or email.
+    If password is supplied, validates against stored hash.
+    """
+    identifier = identifier.strip().lower()
+    users = _load_users()
+    user  = users.get(identifier) or next(
+        (u for u in users.values() if u.get("email","") == identifier), None
+    )
+    if not user:
+        return False, "No account found.", None
+    if password:
+        stored = user.get("password_hash","")
+        if not stored:
+            return False, "No password set — use OTP login.", None
+        if stored != _hash(password):
+            return False, "Incorrect password.", None
+    info = {k: v for k, v in user.items() if k != "password_hash"}
+    return True, "OK", info
 
 
 def _local_send_otp(email: str) -> tuple[bool, str]:
@@ -590,6 +675,72 @@ def verify_otp(email: str, token: str) -> tuple[bool, str, dict | None]:
     if _use_supabase():
         return _sb_verify_otp(email, token)
     return _local_verify_otp(email, token)
+
+
+def verify_magic_link(access_token: str, refresh_token: str = "") -> tuple[bool, str, dict | None]:
+    """
+    Complete magic-link login using the tokens from the URL redirect.
+    Supabase appends #access_token=...&refresh_token=...&type=signup
+    to the redirect URL after the user clicks the email link.
+    Returns (ok, message, user_info|None).
+    """
+    if not _use_supabase():
+        return False, "Magic links only available in Supabase mode", None
+    try:
+        client = _get_supabase_client()
+        # Exchange tokens for a session
+        res = client.auth.set_session(access_token, refresh_token)
+        u   = res.user if hasattr(res, "user") else None
+        if not u:
+            return False, "Invalid or expired magic link", None
+
+        email    = (u.email or "").lower()
+        meta     = u.user_metadata or {}
+        username = meta.get("username", email.split("@")[0])
+        name     = meta.get("name", username)
+
+        # Upsert profile
+        try:
+            client.table("profiles").upsert({
+                "id":       str(u.id),
+                "username": username,
+                "name":     name,
+                "email":    email,
+            }, on_conflict="id").execute()
+        except Exception:
+            pass
+
+        # Also resolve pending_profiles from session state
+        try:
+            import streamlit as _st
+            pending = _st.session_state.get("pending_profiles", {})
+            if email in pending:
+                p = pending[email]
+                username = p.get("username", username)
+                name     = p.get("name", name)
+                try:
+                    client.table("profiles").upsert({
+                        "id":       str(u.id),
+                        "username": username,
+                        "name":     name,
+                        "email":    email,
+                    }, on_conflict="id").execute()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        user_info = {
+            "user_id":  str(u.id),
+            "email":    email,
+            "username": username,
+            "name":     name,
+            "is_admin": False,
+        }
+        return True, f"Welcome, {name}!", user_info
+
+    except Exception as e:
+        return False, f"Magic link error: {e}", None
 
 
 def logout(user_info: dict) -> None:

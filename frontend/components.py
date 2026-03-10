@@ -8,22 +8,189 @@ import streamlit as st
 
 # ── App header ─────────────────────────────────────────────────────────────────
 
-def render_header(label: str = "", index_name: str = "Nifty 50", stock_count: int = 50) -> None:
+def render_header(label: str = "", index_name: str = "Nifty 50",
+                  stock_count: int = 50, user: dict | None = None,
+                  on_logout=None) -> None:
+    from datetime import datetime
     import streamlit as _st
-    date_html = (
-        f'<div class="app-range">📅 {label}</div>' if label else ""
+
+    from datetime import timezone, timedelta as _td
+    _IST = timezone(_td(hours=5, minutes=30))
+    now  = datetime.now(_IST)
+
+    # NSE holidays 2025-2026
+    _NSE_HOLIDAYS = {
+        "2025-01-26","2025-02-26","2025-03-14","2025-03-31",
+        "2025-04-10","2025-04-14","2025-04-18","2025-05-01",
+        "2025-08-15","2025-08-27","2025-10-02","2025-10-20",
+        "2025-10-21","2025-11-05","2025-12-25",
+        "2026-01-26","2026-03-02","2026-03-20","2026-04-02",
+        "2026-04-03","2026-04-14","2026-04-30","2026-08-17",
+        "2026-10-01","2026-10-19","2026-11-04","2026-12-25",
+    }
+    _mins      = now.hour * 60 + now.minute
+    _open      = 9 * 60 + 15    # 09:15 IST
+    _close     = 15 * 60 + 30   # 15:30 IST
+    _is_wkend  = now.weekday() >= 5
+    _is_hol    = now.strftime("%Y-%m-%d") in _NSE_HOLIDAYS
+    _in_hours  = _open <= _mins < _close
+    is_live    = _in_hours and not _is_wkend and not _is_hol
+
+    # Status label
+    if _is_wkend:
+        mkt_txt = "WEEKEND"
+        mkt_c   = "#f0a500"
+        mkt_bg  = "rgba(240,165,0,.07)"
+        mkt_bdr = "rgba(240,165,0,.22)"
+    elif _is_hol:
+        mkt_txt = "HOLIDAY"
+        mkt_c   = "#f0a500"
+        mkt_bg  = "rgba(240,165,0,.07)"
+        mkt_bdr = "rgba(240,165,0,.22)"
+    elif is_live:
+        mkt_txt = "MARKET LIVE"
+        mkt_c   = "#00e5a0"
+        mkt_bg  = "rgba(0,229,160,.07)"
+        mkt_bdr = "rgba(0,229,160,.22)"
+    elif _mins < _open:
+        mkt_txt = "PRE-MARKET"
+        mkt_c   = "#4c8eff"
+        mkt_bg  = "rgba(76,142,255,.07)"
+        mkt_bdr = "rgba(76,142,255,.22)"
+    else:
+        mkt_txt = "MARKET CLOSED"
+        mkt_c   = "#ff3d5a"
+        mkt_bg  = "rgba(255,61,90,.07)"
+        mkt_bdr = "rgba(255,61,90,.22)"
+
+    time_str = now.strftime("%H:%M:%S")
+    date_str = now.strftime("%a, %d %b %Y")
+
+    name     = (user or {}).get("name", "")
+    username = (user or {}).get("username", "")
+    initials = "".join(w[0].upper() for w in name.split()[:2]) if name else "?"
+
+    # ── Step 1: inject CSS separately (no f-string, always works) ──
+    _st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap');
+@keyframes nse-pulse{0%,100%{opacity:1}50%{opacity:.3}}
+@keyframes nse-enter{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:none}}
+@keyframes nse-shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.nse-hdr-wrap{position:relative;overflow:hidden;
+  background:linear-gradient(160deg,#070718 0%,#09091f 40%,#070715 100%);
+  border:1px solid rgba(255,255,255,.06);border-radius:16px;margin-bottom:20px;
+  box-shadow:0 0 0 1px rgba(0,229,160,.04),0 12px 48px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.05);
+  animation:nse-enter .35s cubic-bezier(.22,1,.36,1) both}
+.nse-hdr-glow{pointer-events:none;position:absolute;
+  top:-80px;left:-60px;width:320px;height:220px;
+  background:radial-gradient(ellipse,rgba(0,229,160,.06) 0%,transparent 70%)}
+.nse-hdr-shimmer{position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,transparent,#00e5a0 20%,#4c8eff 50%,#f0a500 70%,#00e5a0 90%,transparent);
+  background-size:200% auto;animation:nse-shimmer 5s linear infinite}
+.nse-hdr-body{position:relative;z-index:1;
+  display:grid;grid-template-columns:1fr auto;align-items:center;gap:16px;padding:18px 24px 14px}
+.nse-wordmark{font-family:'IBM Plex Mono',monospace;font-size:8px;letter-spacing:4px;
+  text-transform:uppercase;color:#00e5a0;opacity:.55;margin-bottom:7px;
+  display:flex;align-items:center;gap:10px}
+.nse-wordmark::before{content:'';display:inline-block;width:20px;height:1px;background:currentColor;opacity:.8}
+.nse-title{font-family:'IBM Plex Mono',monospace;
+  font-size:clamp(18px,2.4vw,28px);font-weight:700;letter-spacing:-.4px;line-height:1;
+  background:linear-gradient(135deg,#d8daf5 0%,#8890c0 100%);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:10px}
+.nse-title em{font-style:normal;
+  background:linear-gradient(130deg,#00e5a0 20%,#00c882 100%);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.nse-pills{display:flex;flex-wrap:wrap;gap:5px}
+.nse-pill{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:5px;
+  font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:500;letter-spacing:1px;text-transform:uppercase}
+.nse-right-panel{display:flex;align-items:center;gap:16px}
+.nse-clock-block{text-align:right}
+.nse-clock{font-family:'IBM Plex Mono',monospace;font-size:22px;font-weight:700;
+  color:#dde0f5;letter-spacing:3px;line-height:1}
+.nse-clock-tz{font-size:9px;color:#2a2d52;font-weight:400;letter-spacing:2px}
+.nse-clock-date{font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:2px;
+  text-transform:uppercase;color:#2e315c;margin-top:3px}
+.nse-mkt-status{display:inline-flex;align-items:center;gap:5px;padding:4px 11px;
+  border-radius:5px;margin-top:6px;font-family:'IBM Plex Mono',monospace;font-size:9px;
+  font-weight:700;letter-spacing:2px;text-transform:uppercase}
+.nse-dot{width:6px;height:6px;border-radius:50%;animation:nse-pulse 2s infinite}
+.nse-divider{height:1px;margin:0 24px;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.04) 20%,rgba(255,255,255,.04) 80%,transparent)}
+.nse-footer{display:flex;align-items:center;justify-content:space-between;
+  flex-wrap:wrap;gap:6px;padding:7px 24px 10px}
+.nse-tag{font-family:'IBM Plex Mono',monospace;font-size:8px;letter-spacing:1.5px;
+  text-transform:uppercase;color:#1a1d38}
+.nse-user{display:flex;align-items:center;gap:10px;
+  border-left:1px solid rgba(255,255,255,.05);padding-left:16px}
+.nse-avatar{width:36px;height:36px;border-radius:50%;flex-shrink:0;
+  background:linear-gradient(135deg,#00e5a0,#00b878);
+  display:flex;align-items:center;justify-content:center;
+  font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:700;color:#04040c;
+  box-shadow:0 0 0 2px rgba(0,229,160,.2)}
+.nse-user-name{font-family:'IBM Plex Mono',monospace;font-size:11px;
+  font-weight:700;color:#e8e9f5;white-space:nowrap}
+.nse-user-handle{font-family:'IBM Plex Mono',monospace;font-size:9px;color:#2e315c;margin-top:2px}
+@media(max-width:640px){
+  .nse-hdr-body{grid-template-columns:1fr;gap:10px}
+  .nse-right-panel{justify-content:space-between}
+  .nse-clock{font-size:18px}}
+</style>""", unsafe_allow_html=True)
+
+    # ── Step 2: build dynamic HTML as a plain string (no f-string CSS inside) ──
+    range_pill = (
+        f'<span class="nse-pill" style="background:rgba(76,142,255,.08);'
+        f'border:1px solid rgba(76,142,255,.22);color:#4c8eff">📅 {label}</span>'
+    ) if label else ""
+
+    user_html = (
+        f'<div class="nse-user">'
+        f'  <div class="nse-avatar">{initials}</div>'
+        f'  <div class="nse-user-info">'
+        f'    <div class="nse-user-name">{name}</div>'
+        f'    <div class="nse-user-handle">@{username}</div>'
+        f'  </div>'
+        f'</div>'
+    ) if name else ""
+
+    html = (
+        '<div class="nse-hdr-wrap">'
+        '  <div class="nse-hdr-glow"></div>'
+        '  <div class="nse-hdr-shimmer"></div>'
+        '  <div class="nse-hdr-body">'
+        '    <div>'
+        '      <div class="nse-wordmark">Quantitative Intelligence Platform</div>'
+        f'     <div class="nse-title">NSE <em>Market</em> Analyzer</div>'
+        '      <div class="nse-pills">'
+        f'       <span class="nse-pill" style="background:rgba(240,165,0,.07);border:1px solid rgba(240,165,0,.2);color:#f0a500">⬡ {index_name}</span>'
+        f'       <span class="nse-pill" style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);color:#3a3e6a">{stock_count} stocks</span>'
+        '        <span class="nse-pill" style="background:rgba(76,142,255,.07);border:1px solid rgba(76,142,255,.2);color:#4c8eff">⚙ RF · GB · Ridge</span>'
+        '        <span class="nse-pill" style="background:rgba(0,229,160,.07);border:1px solid rgba(0,229,160,.18);color:#00e5a0">◎ News Sentiment</span>'
+        f'       {range_pill}'
+        '      </div>'
+        '    </div>'
+        '    <div class="nse-right-panel">'
+        '      <div class="nse-clock-block">'
+        f'       <div class="nse-clock">{time_str} <span class="nse-clock-tz">IST</span></div>'
+        f'       <div class="nse-clock-date">{date_str}</div>'
+        f'       <div class="nse-mkt-status" style="background:{mkt_bg};border:1px solid {mkt_bdr};color:{mkt_c}">'
+        f'         <span class="nse-dot" style="background:{mkt_c}"></span>{mkt_txt}'
+        '        </div>'
+        '      </div>'
+        f'     {user_html}'
+        '    </div>'
+        '  </div>'
+        '  <div class="nse-divider"></div>'
+        '  <div class="nse-footer">'
+        '    <span class="nse-tag">NSE &middot; BSE &middot; India Equity Markets</span>'
+        '    <span class="nse-tag">5yr history &middot; ML ensemble &middot; live sentiment</span>'
+        '    <span class="nse-tag">&#9888; not financial advice</span>'
+        '  </div>'
+        '</div>'
     )
-    _st.markdown(f"""
-    <div class="app-header">
-      <div class="app-wordmark">NSE · Market Intelligence</div>
-      <div class="app-title">NSE Market Analyzer</div>
-      <div class="app-subtitle">
-        {index_name} &nbsp;·&nbsp; {stock_count} stocks &nbsp;·&nbsp;
-        ML ensemble prediction &nbsp;·&nbsp; Live news sentiment
-      </div>
-      {date_html}
-    </div>
-    """, unsafe_allow_html=True)
+    _st.markdown(html, unsafe_allow_html=True)
+
+
 
 
 # ── Stat bar (4 summary metrics) ───────────────────────────────────────────────
