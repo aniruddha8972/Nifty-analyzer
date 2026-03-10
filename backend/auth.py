@@ -93,27 +93,62 @@ def _suggest_usernames(base: str, taken: set[str]) -> list[str]:
 #  LOCAL OTP STORE (in-memory, 60s TTL)
 # ══════════════════════════════════════════════════════════════════════
 
-_LOCAL_OTP: dict[str, tuple[str, float]] = {}   # email → (code, expires_at)
-_OTP_TTL = 300   # 5 minutes
+_LOCAL_OTP: dict[str, tuple[str, float]] = {}   # in-memory cache
+_OTP_TTL = 600   # 10 minutes
+_OTP_FILE = Path(__file__).parent.parent / "data" / ".otp_store.json"  # persisted
+
+
+def _otp_load() -> dict:
+    """Load OTP store from file (survives module reloads)."""
+    try:
+        if _OTP_FILE.exists():
+            data = json.loads(_OTP_FILE.read_text())
+            # Merge into in-memory dict
+            now = time.time()
+            for email, (code, exp) in list(data.items()):
+                if exp > now:
+                    _LOCAL_OTP[email] = (code, exp)
+                else:
+                    data.pop(email, None)
+    except Exception:
+        pass
+    return _LOCAL_OTP
+
+
+def _otp_save() -> None:
+    """Persist OTP store to file."""
+    try:
+        _OTP_FILE.parent.mkdir(parents=True, exist_ok=True)
+        # Only save non-expired entries
+        now = time.time()
+        to_save = {e: list(v) for e, v in _LOCAL_OTP.items() if v[1] > now}
+        _OTP_FILE.write_text(json.dumps(to_save))
+    except Exception:
+        pass
 
 
 def _local_generate_otp(email: str) -> str:
+    _otp_load()  # sync from file first
     code = str(random.randint(100000, 999999))
     _LOCAL_OTP[email] = (code, time.time() + _OTP_TTL)
+    _otp_save()
     return code
 
 
 def _local_verify_otp_code(email: str, code: str) -> bool:
+    _otp_load()  # sync from file — critical after module reload
     entry = _LOCAL_OTP.get(email)
     if not entry:
         return False
     stored_code, expires_at = entry
     if time.time() > expires_at:
-        del _LOCAL_OTP[email]
+        _LOCAL_OTP.pop(email, None)
+        _otp_save()
         return False
     if stored_code != code.strip():
         return False
-    del _LOCAL_OTP[email]
+    _LOCAL_OTP.pop(email, None)
+    _otp_save()
     return True
 
 
