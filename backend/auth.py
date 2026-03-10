@@ -202,29 +202,50 @@ def _sb_register(username: str, name: str, email: str) -> tuple[bool, str]:
     except Exception:
         pass
 
-    # Send OTP — Supabase will create the auth user on first verify
-    # We store the intended username+name in a pending_profiles table or
-    # just pass them via Supabase sign_up metadata.
+    # Store pending profile in session so we can upsert after magic-link verify
     try:
+        import streamlit as _st
+        if "pending_profiles" not in _st.session_state:
+            _st.session_state["pending_profiles"] = {}
+        _st.session_state["pending_profiles"][email] = {
+            "username": username,
+            "name":     name.strip(),
+            "email":    email,
+        }
+    except Exception:
+        pass
+
+    # Get app redirect URL for magic link
+    try:
+        import streamlit as _st2
+        _app_url = _st2.secrets.get("app", {}).get("url", "")
+    except Exception:
+        _app_url = ""
+
+    # Try sign_up first to create the auth user with metadata
+    try:
+        _opts = {"data": {"name": name.strip(), "username": username}}
+        if _app_url:
+            _opts["email_redirect_to"] = _app_url
         client.auth.sign_up({
             "email": email,
-            "password": _random_password(),   # required by sign_up API; user never sees it
-            "options": {
-                "data": {"name": name.strip(), "username": username},
-            },
+            "password": _random_password(),
+            "options": _opts,
         })
     except Exception as e:
         err = str(e).lower()
-        if "already registered" in err:
+        if "already registered" in err or "already been registered" in err:
             return False, "EMAIL_EXISTS:Email already registered — sign in instead"
-        # If sign_up fails (user may already exist from prior attempt), proceed
-        pass
+        pass  # may already exist — fall through to magic link
 
-    # Send OTP
+    # Send magic link via sign_in_with_otp (emailOtp=False → sends clickable link)
     try:
+        _ml_opts: dict = {"should_create_user": True}
+        if _app_url:
+            _ml_opts["email_redirect_to"] = _app_url
         client.auth.sign_in_with_otp({
             "email": email,
-            "options": {"should_create_user": True},
+            "options": _ml_opts,
         })
     except Exception as e:
         err = str(e).lower()
@@ -233,24 +254,9 @@ def _sb_register(username: str, name: str, email: str) -> tuple[bool, str]:
         if m or "security purposes" in err or "rate" in err or "too many" in err:
             secs = m.group(1) if m else "60"
             return False, f"RATE_LIMIT:{secs}"
-        return False, f"Could not send OTP: {e}"
+        return False, f"Could not send magic link: {e}"
 
-    # Store name/username in profiles so verify_otp can upsert it
-    # We use a temporary record with no id (will be filled on verify)
-    try:
-        # Store as pending — will be completed on OTP verify
-        import streamlit as st
-        if "pending_profiles" not in st.session_state:
-            st.session_state["pending_profiles"] = {}
-        st.session_state["pending_profiles"][email] = {
-            "username": username,
-            "name":     name.strip(),
-            "email":    email,
-        }
-    except Exception:
-        pass
-
-    return True, f"OTP_SENT:{email}"
+    return True, f"MAGIC_LINK:{email}"
 
 
 def _random_password() -> str:
@@ -669,6 +675,72 @@ def verify_otp(email: str, token: str) -> tuple[bool, str, dict | None]:
     if _use_supabase():
         return _sb_verify_otp(email, token)
     return _local_verify_otp(email, token)
+
+
+def verify_magic_link(access_token: str, refresh_token: str = "") -> tuple[bool, str, dict | None]:
+    """
+    Complete magic-link login using the tokens from the URL redirect.
+    Supabase appends #access_token=...&refresh_token=...&type=signup
+    to the redirect URL after the user clicks the email link.
+    Returns (ok, message, user_info|None).
+    """
+    if not _use_supabase():
+        return False, "Magic links only available in Supabase mode", None
+    try:
+        client = _get_supabase_client()
+        # Exchange tokens for a session
+        res = client.auth.set_session(access_token, refresh_token)
+        u   = res.user if hasattr(res, "user") else None
+        if not u:
+            return False, "Invalid or expired magic link", None
+
+        email    = (u.email or "").lower()
+        meta     = u.user_metadata or {}
+        username = meta.get("username", email.split("@")[0])
+        name     = meta.get("name", username)
+
+        # Upsert profile
+        try:
+            client.table("profiles").upsert({
+                "id":       str(u.id),
+                "username": username,
+                "name":     name,
+                "email":    email,
+            }, on_conflict="id").execute()
+        except Exception:
+            pass
+
+        # Also resolve pending_profiles from session state
+        try:
+            import streamlit as _st
+            pending = _st.session_state.get("pending_profiles", {})
+            if email in pending:
+                p = pending[email]
+                username = p.get("username", username)
+                name     = p.get("name", name)
+                try:
+                    client.table("profiles").upsert({
+                        "id":       str(u.id),
+                        "username": username,
+                        "name":     name,
+                        "email":    email,
+                    }, on_conflict="id").execute()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        user_info = {
+            "user_id":  str(u.id),
+            "email":    email,
+            "username": username,
+            "name":     name,
+            "is_admin": False,
+        }
+        return True, f"Welcome, {name}!", user_info
+
+    except Exception as e:
+        return False, f"Magic link error: {e}", None
 
 
 def logout(user_info: dict) -> None:
