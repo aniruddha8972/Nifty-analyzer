@@ -14,6 +14,25 @@ from backend.auth import (
     load_user_portfolio, is_supabase_mode,
 )
 
+
+def _handle_send_error(result: str) -> None:
+    """Show friendly error for send_otp / register failures."""
+    if result.startswith("RATE_LIMIT:"):
+        secs = result.split(":")[1]
+        st.markdown(f"""
+        <div style="background:rgba(240,165,0,.07);border:1px solid rgba(240,165,0,.25);
+                    border-radius:10px;padding:14px 16px;margin-top:8px">
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:700;
+                      color:#f0a500;letter-spacing:1px;margin-bottom:4px">⏱ RATE LIMIT</div>
+          <div style="font-family:'Inter',sans-serif;font-size:13px;color:#a07820;line-height:1.6">
+            Supabase allows one OTP request per minute.<br>
+            Please wait <strong style="color:#f0a500">{secs} seconds</strong> then try again.
+          </div>
+        </div>""", unsafe_allow_html=True)
+    else:
+        st.error(f"⚠  {result}")
+
+
 # ─── CSS ──────────────────────────────────────────────────────────────────────
 _CSS = """<style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap');
@@ -263,7 +282,7 @@ def _otp_verify(sb_mode: bool):
                 st.session_state["otp_local"] = local
                 st.rerun()
             else:
-                st.error(f"⚠  {result}")
+                _handle_send_error(result)
     with c2:
         if st.button("← Back", use_container_width=True, key="otp_back"):
             st.session_state.update({"otp_step": "email",
@@ -306,7 +325,7 @@ def _signin(sb_mode: bool):
                 })
                 st.rerun()
             else:
-                st.error(f"⚠  {result}")
+                _handle_send_error(result)
 
 
 # ─── Register panel ───────────────────────────────────────────────────────────
@@ -375,32 +394,86 @@ def _register(sb_mode: bool):
                 elif result.startswith("EMAIL_EXISTS:"):
                     st.error("⚠  Email already registered — use Sign In.")
                 else:
-                    st.error(f"⚠  {result}")
+                    _handle_send_error(result)
 
 
 # ─── Hidden tab switchers (clicked by iframe JS) ──────────────────────────────
 def _switchers():
+    cur = st.session_state.get("auth_tab", "signin")
+
+    # Visual tab bar rendered as HTML (purely decorative — no form widgets)
+    si_bg  = "linear-gradient(135deg,#00e5a0,#00b878)" if cur == "signin"   else "transparent"
+    rg_bg  = "linear-gradient(135deg,#00e5a0,#00b878)" if cur == "register" else "transparent"
+    si_col = "#04040c"  if cur == "signin"   else "#3a3e6a"
+    rg_col = "#04040c"  if cur == "register" else "#3a3e6a"
+    si_fw  = "700"      if cur == "signin"   else "500"
+    rg_fw  = "700"      if cur == "register" else "500"
+
+    st.markdown(f"""
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:3px;
+                background:#0d0d22;border:1px solid #1a1a3a;
+                border-radius:11px;padding:3px;margin-bottom:18px">
+      <div style="background:{si_bg};border-radius:8px;padding:11px;text-align:center;
+                  font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:{si_fw};
+                  letter-spacing:1.5px;text-transform:uppercase;color:{si_col};
+                  box-shadow:{'0 2px 14px rgba(0,229,160,.25)' if cur=='signin' else 'none'}">
+        SIGN IN
+      </div>
+      <div style="background:{rg_bg};border-radius:8px;padding:11px;text-align:center;
+                  font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:{rg_fw};
+                  letter-spacing:1.5px;text-transform:uppercase;color:{rg_col};
+                  box-shadow:{'0 2px 14px rgba(0,229,160,.25)' if cur=='register' else 'none'}">
+        REGISTER
+      </div>
+    </div>
+
+    <style>
+    /* Force the real Streamlit tab buttons side-by-side, tightly */
+    div[data-testid="stHorizontalBlock"]:has(button[data-testid="baseButton-secondary"]) {{
+      gap: 4px !important;
+    }}
+    /* Hide the functional tab buttons visually — they're clicked programmatically */
+    button[key="_sw_si"], button[key="_sw_rg"] {{ display:none !important; }}
+    </style>
+    """, unsafe_allow_html=True)
+
+    # Actual functional buttons — hidden, wired to the HTML tabs above via JS
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("signin", key="_sw_si"):
+        if st.button("signin", key="_sw_si", use_container_width=True):
             st.session_state.update({"auth_tab": "signin", "otp_step": "email"})
             st.rerun()
     with c2:
-        if st.button("register", key="_sw_rg"):
+        if st.button("register", key="_sw_rg", use_container_width=True):
             st.session_state.update({"auth_tab": "register", "otp_step": "email"})
             st.rerun()
+
+    # Hide functional buttons + wire HTML tabs to click them
     st.markdown("""<script>
 (function(){
-  function hide(){
-    document.querySelectorAll('[data-testid="stButton"] button').forEach(function(b){
-      var t=b.innerText.trim();
-      if(t==='signin'||t==='register'){
-        var w=b.closest('[data-testid="stButton"]');
-        if(w)w.style.cssText='display:none!important;height:0;overflow:hidden;margin:0;padding:0';
-      }
+  function setup(){
+    // Hide functional buttons
+    ['signin','register'].forEach(function(t){
+      document.querySelectorAll('[data-testid="stButton"] button').forEach(function(b){
+        if(b.innerText.trim()===t){
+          var w=b.closest('[data-testid="stButton"]');
+          if(w)w.style.cssText='display:none!important;height:0;overflow:hidden;margin:0;padding:0';
+        }
+      });
+    });
+    // Wire the HTML tab divs to click the hidden buttons
+    var tabs=document.querySelectorAll('.auth-tab-trigger');
+    tabs.forEach(function(tab){
+      tab.style.cursor='pointer';
+      tab.addEventListener('click',function(){
+        var t=tab.getAttribute('data-tab');
+        document.querySelectorAll('[data-testid="stButton"] button').forEach(function(b){
+          if(b.innerText.trim()===t)b.click();
+        });
+      });
     });
   }
-  hide();setTimeout(hide,150);setTimeout(hide,500);
+  setup();setTimeout(setup,200);setTimeout(setup,600);
 })();
 </script>""", unsafe_allow_html=True)
 
@@ -422,12 +495,12 @@ def render_auth_page() -> bool:
     # Animated shell — rendered via components.html (decorative only, no form widgets)
     components.html(_shell_html(cur_tab, sb_mode), height=220, scrolling=False)
 
-    # Hidden tab switchers wired to iframe JS
-    _switchers()
-
-    # Form — rendered in a centered narrow column
+    # Everything inside the centered card column
     _, col, _ = st.columns([1, 2, 1])
     with col:
+        # Tab switcher (inside the card — renders correctly on all screen sizes)
+        _switchers()
+
         if cur_tab == "signin":
             _signin(sb_mode)
         else:
