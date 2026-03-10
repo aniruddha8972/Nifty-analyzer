@@ -11,7 +11,7 @@ import streamlit as st
 import streamlit.components.v1 as components  # noqa – imported for test compat
 from backend.auth import (
     send_otp, verify_otp, register,
-    load_user_portfolio, is_supabase_mode,
+    load_user_portfolio, is_supabase_mode, verify_magic_link,
 )
 
 
@@ -329,7 +329,55 @@ def _signin(sb_mode: bool):
 
 
 # ─── Register panel ───────────────────────────────────────────────────────────
+
+
+def _magic_wait_screen():
+    """Shown after magic link is sent — user must click link in email."""
+    email = st.session_state.get("otp_email", "")
+    st.markdown(f"""
+    <div style="background:rgba(0,229,160,.04);border:1px solid rgba(0,229,160,.15);
+                border-radius:14px;padding:28px 24px;margin:8px 0 20px;text-align:center">
+      <div style="font-size:40px;margin-bottom:12px">✉️</div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:3px;
+                  text-transform:uppercase;color:#00e5a0;margin-bottom:10px">
+        Magic Link Sent
+      </div>
+      <div style="font-family:'Inter',sans-serif;font-size:14px;color:#8888aa;
+                  line-height:1.7;margin-bottom:16px">
+        We've sent a secure sign-in link to<br>
+        <span style="color:#00e5a0;font-family:'IBM Plex Mono',monospace;
+                     font-weight:600;font-size:13px">{email}</span>
+      </div>
+      <div style="font-family:'Inter',sans-serif;font-size:12px;color:#3a3e6a;line-height:1.8">
+        1. Open your email inbox<br>
+        2. Click the <strong style="color:#00e5a0">Confirm your email</strong> link<br>
+        3. You'll be signed in automatically
+      </div>
+    </div>
+    <div style="background:rgba(240,165,0,.04);border:1px solid rgba(240,165,0,.12);
+                border-radius:8px;padding:10px 14px;
+                font-family:'IBM Plex Mono',monospace;font-size:9px;
+                letter-spacing:1px;color:#6a5020;text-align:center">
+      ⏱ Link expires in 60 minutes &nbsp;·&nbsp; Check spam if not received
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+    if st.button("← Back to Register", use_container_width=True, key="magic_back"):
+        st.session_state.update({
+            "otp_step": "email", "otp_email": "",
+            "otp_context": "", "auth_tab": "register",
+        })
+        st.rerun()
+
 def _register(sb_mode: bool):
+    # Magic link waiting screen (Supabase mode)
+    if (st.session_state["otp_step"] == "magic_wait"
+            and st.session_state["otp_context"] == "register"):
+        _magic_wait_screen()
+        return
+
+    # OTP code verify (local mode fallback)
     if (st.session_state["otp_step"] == "verify"
             and st.session_state["otp_context"] == "register"):
         _otp_verify(sb_mode)
@@ -366,12 +414,21 @@ def _register(sb_mode: bool):
                 ok, result = register(u, n, e)
             if ok:
                 parts = result.split(":")
-                st.session_state.update({
-                    "otp_step":    "verify",
-                    "otp_email":   parts[1] if len(parts) >= 2 else e,
-                    "otp_local":   parts[3] if len(parts) >= 4 and parts[2] == "LOCAL" else "",
-                    "otp_context": "register",
-                })
+                if result.startswith("MAGIC_LINK:"):
+                    # Magic link sent — show waiting screen (no OTP input needed)
+                    st.session_state.update({
+                        "otp_step":    "magic_wait",
+                        "otp_email":   parts[1] if len(parts) >= 2 else e,
+                        "otp_context": "register",
+                    })
+                else:
+                    # Local mode fallback — use OTP code
+                    st.session_state.update({
+                        "otp_step":    "verify",
+                        "otp_email":   parts[1] if len(parts) >= 2 else e,
+                        "otp_local":   parts[3] if len(parts) >= 4 and parts[2] == "LOCAL" else "",
+                        "otp_context": "register",
+                    })
                 st.rerun()
             else:
                 if result.startswith("USERNAME_TAKEN:"):
